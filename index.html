@@ -1,21 +1,412 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Max Calabro</title>
-  <link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Max Calabro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800..900&family=Fraunces:ital,opsz,wght@0,9..144,300;1,9..144,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --ink: #f5f1e8;
+    --muted: #8a8580;
+    --rule: rgba(245, 241, 232, 0.12);
+
+    /* neon/pastel palette for the wordmark */
+    --c1: #ff5ea8;  /* hot pink   */
+    --c2: #ffd166;  /* butter     */
+    --c3: #8be8cb;  /* mint       */
+    --c4: #7cc7ff;  /* sky        */
+    --c5: #c39bff;  /* lavender   */
+    --c6: #ff8a5b;  /* coral      */
+    --c7: #b8ff5e;  /* lime       */
+    --c8: #ff5ea8;
+    --c9: #ffd166;
+    --c10: #8be8cb;
+    --c11: #7cc7ff;
+    --c12: #c39bff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 300;
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+    /* film-grain feel */
+    background-image:
+      radial-gradient(ellipse at top left, rgba(195, 155, 255, 0.08), transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(124, 199, 255, 0.06), transparent 50%);
+  }
+
+  /* subtle grain overlay */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0.35;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  }
+
+  /* ───── top bar ───── */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 50;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.72rem;
+    mix-blend-mode: difference;
+  }
+  .topbar .mark { color: var(--ink); }
+  .topbar nav { display: flex; gap: 1.75rem; }
+  .topbar nav a {
+    color: var(--ink);
+    text-decoration: none;
+    position: relative;
+    transition: opacity 0.2s;
+  }
+  .topbar nav a:hover { opacity: 0.55; }
+  .topbar nav a::before {
+    content: "→";
+    margin-right: 0.4em;
+    opacity: 0;
+    transform: translateX(-4px);
+    display: inline-block;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  .topbar nav a:hover::before { opacity: 1; transform: translateX(0); }
+
+  /* ───── splash ───── */
+  .splash {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6rem 2rem 4rem;
+    position: relative;
+  }
+
+  .wordmark {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 900;
+    font-size: clamp(4rem, 18vw, 16rem);
+    line-height: 0.85;
+    letter-spacing: -0.04em;
+    text-transform: uppercase;
+    margin-left: -0.05em; /* optical alignment */
+  }
+  .wordmark .row { display: block; }
+  .wordmark span {
+    display: inline-block;
+    transition: transform 0.45s cubic-bezier(.2,.9,.3,1.3);
+  }
+  .wordmark span:hover {
+    transform: translateY(-0.08em) rotate(-3deg);
+  }
+
+  /* assign a color to each letter */
+  .l1  { color: var(--c1); }
+  .l2  { color: var(--c2); }
+  .l3  { color: var(--c3); }
+  .l4  { color: var(--c4); }
+  .l5  { color: var(--c5); }
+  .l6  { color: var(--c6); }
+  .l7  { color: var(--c7); }
+  .l8  { color: var(--c8); }
+  .l9  { color: var(--c9); }
+  .l10 { color: var(--c10); }
+  .l11 { color: var(--c11); }
+  .l12 { color: var(--c12); }
+
+  /* fade-in on load */
+  .wordmark span {
+    opacity: 0;
+    animation: rise 0.9s cubic-bezier(.2,.9,.3,1) forwards;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(0.5em); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .meta {
+    margin-top: 3rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    max-width: 720px;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .meta div span { display: block; color: var(--ink); margin-top: 0.35em; font-weight: 800; }
+
+  .scroll-cue {
+    position: absolute;
+    bottom: 2rem;
+    right: 2rem;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.65rem;
+    color: var(--muted);
+    writing-mode: vertical-rl;
+    animation: drift 2.5s ease-in-out infinite;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translateY(0); opacity: 0.5; }
+    50%      { transform: translateY(8px); opacity: 1; }
+  }
+
+  /* ───── section frame ───── */
+  section.frame {
+    padding: 8rem 2rem 6rem;
+    border-top: 1px solid var(--rule);
+    position: relative;
+  }
+  .section-label {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-bottom: 3rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .section-label::before {
+    content: "";
+    width: 2rem;
+    height: 1px;
+    background: var(--muted);
+  }
+  .section-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 300;
+    font-style: italic;
+    font-size: clamp(2.5rem, 6vw, 5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin-bottom: 4rem;
+    max-width: 14ch;
+  }
+
+  /* ───── gallery ───── */
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 1.25rem;
+  }
+  .gallery figure {
+    position: relative;
+    overflow: hidden;
+    background: #1a1a1a;
+    border-radius: 2px;
+  }
+  .gallery figure::after {
+    content: attr(data-num);
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    color: var(--ink);
+    background: rgba(10, 10, 10, 0.6);
+    backdrop-filter: blur(6px);
+    padding: 0.3rem 0.55rem;
+    border-radius: 2px;
+    z-index: 2;
+  }
+  .gallery img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.7s cubic-bezier(.2,.9,.3,1), filter 0.4s;
+    filter: saturate(0.95);
+  }
+  .gallery figure:hover img {
+    transform: scale(1.04);
+    filter: saturate(1.1);
+  }
+
+  /* asymmetric layout: 9 pieces in an editorial grid */
+  .g1 { grid-column: 1 / 7;  aspect-ratio: 4/5; }
+  .g2 { grid-column: 7 / 13; aspect-ratio: 4/3; }
+  .g3 { grid-column: 1 / 5;  aspect-ratio: 1/1; }
+  .g4 { grid-column: 5 / 9;  aspect-ratio: 1/1; }
+  .g5 { grid-column: 9 / 13; aspect-ratio: 3/4; grid-row: span 2; }
+  .g6 { grid-column: 1 / 5;  aspect-ratio: 4/3; }
+  .g7 { grid-column: 5 / 9;  aspect-ratio: 4/3; }
+  .g8 { grid-column: 1 / 7;  aspect-ratio: 3/2; }
+  .g9 { grid-column: 7 / 13; aspect-ratio: 3/2; }
+
+  /* ───── contact ───── */
+  .contact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0;
+    border-top: 1px solid var(--rule);
+  }
+  .contact-grid a {
+    display: block;
+    padding: 3rem 0;
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--rule);
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    line-height: 1;
+    position: relative;
+    transition: color 0.3s, padding-left 0.3s;
+  }
+  .contact-grid a:first-child { border-right: 1px solid var(--rule); padding-right: 2rem; }
+  .contact-grid a:nth-child(2) { padding-left: 2rem; }
+  .contact-grid a .label {
+    display: block;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-style: normal;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-bottom: 1rem;
+  }
+  .contact-grid a:hover { color: var(--c3); }
+  .contact-grid a:nth-child(2):hover { color: var(--c4); }
+
+  /* ───── footer ───── */
+  footer {
+    padding: 3rem 2rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-family: 'Bricolage Grotesque', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.65rem;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+  }
+  footer .colophon { max-width: 22ch; line-height: 1.6; }
+
+  /* ───── responsive ───── */
+  @media (max-width: 720px) {
+    .topbar { padding: 1rem 1.25rem; font-size: 0.65rem; }
+    .topbar nav { gap: 1rem; }
+    .splash { padding: 5rem 1.25rem 3rem; }
+    section.frame { padding: 5rem 1.25rem 4rem; }
+    .meta { grid-template-columns: 1fr; gap: 1.25rem; }
+    .gallery { grid-template-columns: repeat(6, 1fr); gap: 0.75rem; }
+    .g1 { grid-column: 1 / 7; aspect-ratio: 4/5; }
+    .g2 { grid-column: 1 / 7; aspect-ratio: 4/3; }
+    .g3 { grid-column: 1 / 4; aspect-ratio: 1/1; }
+    .g4 { grid-column: 4 / 7; aspect-ratio: 1/1; }
+    .g5 { grid-column: 1 / 7; aspect-ratio: 3/4; grid-row: auto; }
+    .g6 { grid-column: 1 / 4; aspect-ratio: 1/1; }
+    .g7 { grid-column: 4 / 7; aspect-ratio: 1/1; }
+    .g8 { grid-column: 1 / 7; aspect-ratio: 3/2; }
+    .g9 { grid-column: 1 / 7; aspect-ratio: 3/2; }
+    .contact-grid { grid-template-columns: 1fr; }
+    .contact-grid a:first-child { border-right: none; padding-right: 0; }
+    .contact-grid a:nth-child(2) { padding-left: 0; }
+    .scroll-cue { display: none; }
+    footer { flex-direction: column; gap: 1.5rem; align-items: flex-start; }
+  }
+</style>
 </head>
 <body>
-  <div class="hero">
-    <div class="overlay">
-      <h1>Max Calabro</h1>
-      <p class="intro">
-        Hello! I'm a creative developer and artist based in Portland.  
-        This is my personal site where I share projects, ideas, and visual work.
-      </p>
-      <a class="button" href="gallery.html">View My Art</a>
-    </div>
+
+<div class="topbar">
+  <div class="mark">MC ©2026</div>
+  <nav>
+    <a href="#work">Work</a>
+    <a href="#contact">Contact</a>
+  </nav>
+</div>
+
+<header class="splash" id="top">
+  <h1 class="wordmark" aria-label="Max Calabro">
+    <span class="row">
+      <span class="l1"  style="animation-delay:0.05s">M</span><span class="l2"  style="animation-delay:0.10s">A</span><span class="l3"  style="animation-delay:0.15s">X</span>
+    </span>
+    <span class="row">
+      <span class="l4"  style="animation-delay:0.25s">C</span><span class="l5"  style="animation-delay:0.30s">A</span><span class="l6"  style="animation-delay:0.35s">L</span><span class="l7"  style="animation-delay:0.40s">A</span><span class="l8"  style="animation-delay:0.45s">B</span><span class="l9"  style="animation-delay:0.50s">R</span><span class="l10" style="animation-delay:0.55s">O</span>
+    </span>
+  </h1>
+
+  <div class="meta">
+    <div>Discipline<span>Artist · Maker</span></div>
+    <div>Index<span>01 — Work / 02 — Contact</span></div>
   </div>
+
+  <div class="scroll-cue">Scroll ↓</div>
+</header>
+
+<section class="frame" id="work">
+  <div class="section-label">01 — Selected Work</div>
+  <h2 class="section-title">A small, evolving archive.</h2>
+
+  <div class="gallery">
+    <figure class="g1" data-num="01"><img src="images/art-1.jpg" alt="Artwork 1" loading="lazy"></figure>
+    <figure class="g2" data-num="02"><img src="images/art-2.jpg" alt="Artwork 2" loading="lazy"></figure>
+    <figure class="g3" data-num="03"><img src="images/art-3.jpg" alt="Artwork 3" loading="lazy"></figure>
+    <figure class="g4" data-num="04"><img src="images/art-4.jpg" alt="Artwork 4" loading="lazy"></figure>
+    <figure class="g5" data-num="05"><img src="images/art-5.jpg" alt="Artwork 5" loading="lazy"></figure>
+    <figure class="g6" data-num="06"><img src="images/art-6.jpg" alt="Artwork 6" loading="lazy"></figure>
+    <figure class="g7" data-num="07"><img src="images/art-7.jpg" alt="Artwork 7" loading="lazy"></figure>
+    <figure class="g8" data-num="08"><img src="images/art-8.jpg" alt="Artwork 8" loading="lazy"></figure>
+    <figure class="g9" data-num="09"><img src="images/art-9.jpg" alt="Artwork 9" loading="lazy"></figure>
+  </div>
+</section>
+
+<section class="frame" id="contact">
+  <div class="section-label">02 — Elsewhere</div>
+  <h2 class="section-title">Say hello, or just look around.</h2>
+
+  <div class="contact-grid">
+    <a href="mailto:mdcalabro@gmail.com">
+      <span class="label">Email →</span>
+      mdcalabro@gmail.com
+    </a>
+    <a href="https://www.linkedin.com/in/maxcalabro/" target="_blank" rel="noopener">
+      <span class="label">LinkedIn →</span>
+      /in/maxcalabro
+    </a>
+  </div>
+</section>
+
+<footer>
+  <div class="colophon">Set in Bricolage Grotesque &amp; Fraunces. Handmade in 2026.</div>
+  <div>← <a href="#top" style="color:inherit; text-decoration:none;">Back to top</a></div>
+</footer>
+
 </body>
 </html>
