@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>LEVEL DOWN</title>
+<style>
+  body {
+    margin: 0;
+    background: #1a1a1a;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+  h1 { margin: 0 0 8px 0; font-size: 18px; font-weight: 500; }
+  p  { margin: 0 0 16px 0; font-size: 13px; color: #999; text-align: center; max-width: 800px; }
+
+  .game-wrapper { position: relative; }
+  #game { box-shadow: 0 4px 24px rgba(0,0,0,0.5); min-width: 800px; min-height: 608px; background:#000; }
+
+  /* Two character sheets (Attributes / Inventory) share the same
+     placement and styling. Toggled with C and I respectively;
+     mutually exclusive at open time. */
+  .game-sheet {
+    display: none;
+    position: absolute;
+    top: 16px; left: 16px; right: 16px; bottom: 16px;
+    padding: 16px 18px;
+    background: rgba(20, 20, 24, 0.96);
+    border: 1px solid #444;
+    color: #ddd;
+    font-family: monospace;
+    font-size: 12px;
+    overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  }
+  .game-sheet.open { display: flex; flex-direction: column; gap: 14px; }
+
+  .game-sheet header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    border-bottom: 1px solid #333; padding-bottom: 8px;
+  }
+  .game-sheet h2 { margin: 0; font-size: 14px; letter-spacing: 1px; color: #fff; }
+  .game-sheet .hint { font-size: 11px; color: #777; }
+
+  .character-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .character-col {
+    background: #1f1f24;
+    border: 1px solid #393940;
+    padding: 10px 12px;
+    border-radius: 3px;
+    min-width: 0;
+  }
+  .character-col h3 {
+    margin: 0 0 4px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: #fff;
+  }
+  .character-col .role {
+    font-size: 10px; color: #777; margin-bottom: 10px;
+  }
+  .character-col h4 {
+    margin: 10px 0 6px;
+    font-size: 10px; color: #999;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+
+  /* Slider rows inside character columns — compact horizontal row
+     that fits the narrower 3-up layout. */
+  .character-col .slider-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(60px, 1fr) 38px;
+    gap: 6px;
+    align-items: center;
+    margin: 3px 0;
+  }
+  .character-col .slider-row input[type=range] { width: 100%; }
+  .character-col .slider-row label { font-size: 10px; color: #bbb; }
+  .character-col .slider-row span { font-size: 10px; text-align: right; color: #ddd; }
+
+  /* Per-character stats — single-column list. */
+  .stats-grid {
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .stat-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 3px 8px;
+    background: #25252a;
+    border: 1px solid #393940;
+    border-radius: 2px;
+  }
+  .stat-label {
+    font-size: 10px; color: #aaa;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .stat-value { font-size: 12px; color: #fff; font-weight: bold; }
+
+  /* Per-character resistances — single-column list of all tags. */
+  .resistances-grid {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .resistance-cell {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 8px;
+    background: #1f1f24;
+    border: 1px solid #393940;
+    border-radius: 2px;
+  }
+  .resistance-label {
+    font-size: 10px; color: #aaa;
+    letter-spacing: 0.5px;
+  }
+  .resistance-value { font-size: 10px; color: #ddd; font-weight: bold; }
+  .resistance-value.positive { color: #88c0ff; }
+  .resistance-value.negative { color: #ff9090; }
+
+  /* Active skill list (between Resistances and Equipment). */
+  .skills-list { display: flex; flex-direction: column; gap: 3px; }
+  .skill-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 4px 8px;
+    background: #25252a;
+    border: 1px solid #393940;
+    border-radius: 2px;
+  }
+  .skill-name { font-size: 11px; color: #fff; }
+  .skill-detail { font-size: 10px; color: #aac; }
+  .skill-empty {
+    padding: 4px 8px;
+    color: #666;
+    font-style: italic;
+    font-size: 10px;
+  }
+
+  /* Detailed skill list (attributes sheet only). Each skill is a
+     card with a header (name + headline number), a row of tag
+     badges, and one line per contributing source so the player can
+     see exactly where the damage / heal value comes from. */
+  .skills-detail { display: flex; flex-direction: column; gap: 5px; }
+  .skill-card {
+    background: #1f1f26;
+    border: 1px solid #383840;
+    border-radius: 3px;
+    padding: 4px 6px;
+  }
+  .skill-card-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .skill-card-header .skill-name { font-size: 12px; color: #fff; font-weight: bold; }
+  .skill-card-header .skill-total { font-size: 11px; color: #ffd66b; }
+  .skill-card-header .skill-total.heal { color: #88ff88; }
+  .skill-card-header .skill-total.buff { color: #88ccff; }
+  .skill-card-tags { margin-top: 2px; }
+  .tag-badge {
+    display: inline-block;
+    font-size: 9px;
+    color: #aaa;
+    background: #2c2c34;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-right: 3px;
+    margin-bottom: 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .skill-card-line {
+    font-size: 10px;
+    color: #888;
+    padding-left: 4px;
+    margin-top: 1px;
+  }
+  .skill-card-line .skill-contrib-tag { color: #bcd; }
+
+  .equipment-grid {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  /* Equipment slot — flex row with the slot label on the left and
+     the (square, icon-only) item card on the right. Keeps each slot
+     to a single short row so all four character columns + the
+     inventory grid fit on-screen without horizontal scrolling. */
+  .slot {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 6px;
+    min-height: 38px;
+    background: #25252a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    box-sizing: border-box;
+  }
+  .slot-label {
+    font-size: 9px; color: #888;
+    letter-spacing: 1.5px;
+    min-width: 60px;
+    flex-shrink: 0;
+  }
+  .stats-summary { font-weight: normal; font-size: 10px; color: #888; margin-left: 6px; letter-spacing: 0.5px; }
+
+  /* An item card lives inside a slot or inventory cell. The card is
+     the draggable thing; the surrounding cell is the drop target.
+     Cards are icon-only — the name and full stats appear in the hover
+     tooltip (see .item-tooltip) so the inventory grid stays compact. */
+  .item-card {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #3a3a45;
+    border: 2px solid #5a5a68;
+    border-radius: 3px;
+    padding: 2px;
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    cursor: grab;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .item-card:active { cursor: grabbing; }
+  .item-card.dragging { opacity: 0.4; }
+  .item-icon {
+    width: 24px; height: 24px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  /* The name is hidden in the card itself — see the hover tooltip
+     below for the full readout. Keeping the DOM element around (just
+     not rendering it) means the card-build code in character-sheet.js
+     stays simple. */
+  .item-name { display: none; }
+
+  /* Item rarity colours, keyed off modifier count (1–5). The card's
+     2 px border picks up the rarity tint so the player can read
+     rarity at a glance. The tooltip's .tt-name uses the same classes
+     so the title in the popup matches the card. */
+  .item-card.rarity-1 { border-color: #888;    }
+  .item-card.rarity-2 { border-color: #88ccff; }
+  .item-card.rarity-3 { border-color: #ffdd55; }
+  .item-card.rarity-4 { border-color: #cc88ff; }
+  .item-card.rarity-5 { border-color: #ff9944; }
+
+  .item-tooltip .tt-name.rarity-1 { color: #ffffff; }
+  .item-tooltip .tt-name.rarity-2 { color: #88ccff; }
+  .item-tooltip .tt-name.rarity-3 { color: #ffdd55; }
+  .item-tooltip .tt-name.rarity-4 { color: #cc88ff; }
+  .item-tooltip .tt-name.rarity-5 { color: #ff9944; }
+
+  /* Hover tooltip — single fixed element appended to body. */
+  .item-tooltip {
+    position: fixed;
+    display: none;
+    z-index: 200;
+    pointer-events: none;
+    min-width: 140px;
+    max-width: 220px;
+    padding: 6px 8px;
+    background: #16161b;
+    border: 1px solid #5a5a68;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #ddd;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
+  }
+  .item-tooltip.visible { display: block; }
+  .item-tooltip .tt-name { color: #fff; font-weight: bold; }
+  .item-tooltip .tt-type {
+    margin-top: 1px; margin-bottom: 4px;
+    color: #888; font-size: 10px;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .item-tooltip .tt-stat { color: #aac; font-size: 10px; }
+  .item-tooltip .tt-stat.negative { color: #f88; }
+  .item-tooltip .tt-tier {
+    color: #888; font-size: 9px;
+    margin-left: 4px; letter-spacing: 0.5px;
+  }
+  .item-tooltip .tt-skill {
+    margin-top: 4px;
+    color: #88cc88; font-size: 10px;
+    font-style: italic;
+  }
+
+  /* Drag highlighting */
+  .drop-target.valid-drop {
+    border-color: #4cc9f0aa;
+    background: rgba(76, 201, 240, 0.06);
+  }
+  .drop-target.drag-over {
+    background: #2a3a45;
+    border-color: #4cc9f0;
+  }
+  .drop-target.invalid-drop { opacity: 0.35; }
+
+  /* Shared inventory grid */
+  .shared-inventory { margin-top: 4px; }
+  .shared-inventory h3 .inv-count {
+    font-weight: normal; font-size: 10px; color: #888;
+    letter-spacing: 0.5px; margin-left: 6px;
+  }
+  #inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 4px;
+  }
+  /* Cells centre the (now icon-only) item card inside. The dashed
+     border stays visible when the slot is empty so the player sees
+     the drop targets. */
+  .inv-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    background: #1b1b20;
+    border: 1px dashed #393940;
+    border-radius: 3px;
+    padding: 3px;
+  }
+  .inv-hint {
+    margin-top: 6px;
+    font-size: 10px;
+    color: #777;
+    font-style: italic;
+  }
+
+  /* Trash slot — drop items here to delete them. */
+  .trash-slot {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #2a1818;
+    border: 1px dashed #663030;
+    border-radius: 3px;
+    text-align: center;
+  }
+  .trash-slot .trash-label {
+    color: #e89090; font-size: 11px;
+    font-weight: bold; letter-spacing: 1.5px;
+  }
+  .trash-slot .trash-hint {
+    margin-top: 2px;
+    color: #884444; font-size: 9px;
+    font-style: italic;
+  }
+
+  /* Start menu (shown on load until START is clicked). */
+  #start-menu {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 28px 36px;
+    background: rgba(15, 15, 18, 0.97);
+    color: #ddd;
+    font-family: monospace;
+    font-size: 13px;
+    overflow-y: auto;
+    z-index: 10;
+  }
+  #start-menu.open {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 22px;
+  }
+
+  /* Animated "LEVEL DOWN" title. Each letter is a span so we can
+     give it its own colour-cycle animation with a per-letter delay,
+     producing a flowing rainbow wave across the word. */
+  #game-title {
+    font-family: 'Courier New', 'Courier', monospace;
+    font-size: 96px; font-weight: bold;
+    letter-spacing: 6px;
+    margin: 24px 0 8px;
+    line-height: 1;
+    user-select: none;
+    text-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  }
+  #game-title .title-letter {
+    display: inline-block;
+    animation: title-rainbow 3s linear infinite, title-bob 1.8s ease-in-out infinite;
+  }
+  #game-title .title-space { display: inline-block; width: 28px; }
+  @keyframes title-rainbow {
+    0%   { color: #ff5e5e; }
+    14%  { color: #ffa64c; }
+    28%  { color: #ffe34c; }
+    42%  { color: #58e070; }
+    57%  { color: #4cc9f0; }
+    71%  { color: #9a72ff; }
+    85%  { color: #ff64c8; }
+    100% { color: #ff5e5e; }
+  }
+  @keyframes title-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+
+  #start-menu .intro-text {
+    max-width: 460px;
+    text-align: center;
+    color: #bbb;
+    line-height: 1.5;
+    margin: 0;
+  }
+  #start-menu h3 {
+    margin: 0 0 10px;
+    font-size: 11px; color: #999;
+    letter-spacing: 1.5px; text-transform: uppercase;
+    text-align: center;
+  }
+  #start-menu section { margin: 0; width: 100%; max-width: 420px; }
+  #start-menu section[hidden] { display: none; }
+
+  .name-input-row {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 12px; align-items: center;
+    padding: 8px 12px;
+    background: #25252a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    margin-bottom: 8px;
+  }
+  .name-input-row .role-label {
+    color: #88ccff; font-weight: bold;
+    font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .name-input-row input[type="text"] {
+    background: #1c1c20; color: #fff;
+    border: 1px solid #444;
+    border-radius: 2px;
+    padding: 6px 8px;
+    font-family: monospace; font-size: 13px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .name-input-row input[type="text"]:focus {
+    outline: none;
+    border-color: #4cc9f0;
+  }
+
+  /* Quick tips shown on the name-entry screen. Compact list so the
+     menu stays scannable. */
+  .hero-tips {
+    margin-top: 16px;
+    padding: 10px 14px;
+    background: #1c1c22;
+    border: 1px solid #383840;
+    border-radius: 4px;
+  }
+  .hero-tips h3 {
+    margin: 0 0 6px;
+    text-align: left;
+  }
+  .hero-tips ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #cfd0d6;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .hero-tips li { margin-bottom: 3px; }
+  .hero-tips li:last-child { margin-bottom: 0; }
+  .hero-tips kbd {
+    background: #2a2a32;
+    border: 1px solid #555;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #fff;
+  }
+  .hero-tips strong { color: #fff; }
+  .hero-tips .gain  { color: #88ff88; font-weight: bold; }
+  .hero-tips .loss  { color: #ff8888; font-weight: bold; }
+  .hero-tips .emoji { font-size: 14px; vertical-align: -1px; }
+
+  /* Score Multiplier panel — sits at the top of the attributes sheet
+     (upper-left in flex order) and lists every gain / loss that has
+     been applied. Capped via max-height + scroll so a long run
+     doesn't push the character grid off-screen. */
+  .score-multi-panel {
+    background: #1f1f24;
+    border: 1px solid #393940;
+    border-radius: 4px;
+    padding: 10px 14px;
+    max-width: 340px;
+  }
+  .score-multi-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .score-multi-header h3 {
+    margin: 0;
+    font-size: 11px; color: #999;
+    letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .score-multi-value {
+    font-size: 20px; font-weight: bold; color: #ffdd55;
+    letter-spacing: 1px;
+  }
+  .score-multi-history {
+    list-style: none; padding: 0; margin: 0;
+    max-height: 110px;
+    overflow-y: auto;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+  .score-multi-history li {
+    display: flex; gap: 8px;
+    padding: 1px 2px;
+    border-bottom: 1px solid #2a2a30;
+  }
+  .score-multi-history li:last-child { border-bottom: none; }
+  .score-multi-history li.gain .delta { color: #88ff88; }
+  .score-multi-history li.loss .delta { color: #ff8888; }
+  .score-multi-history li .delta { font-weight: bold; min-width: 48px; }
+  .score-multi-history li .label { color: #aaa; }
+  .score-multi-history li.history-empty {
+    color: #666; font-style: italic;
+    border: none; padding: 4px 2px;
+  }
+
+  /* Centred popup modals — used by the level-up choice and the
+     revive prompt. Same dark card look as the start menu but
+     compact and centred over the game canvas. */
+  .game-popup {
+    display: none;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 30;
+    min-width: 360px;
+    max-width: 520px;
+    padding: 22px 26px;
+    background: rgba(20, 20, 26, 0.98);
+    border: 2px solid #4a4a55;
+    border-radius: 8px;
+    color: #ddd;
+    font-family: monospace;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.8);
+  }
+  .game-popup.open { display: block; }
+  .game-popup h2 {
+    margin: 0 0 6px;
+    font-size: 18px;
+    color: #fff;
+    letter-spacing: 2px;
+    text-align: center;
+  }
+  .game-popup .popup-sub {
+    margin: 0 0 16px;
+    font-size: 12px;
+    color: #aaa;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .game-popup .popup-sub .gain { color: #88ff88; font-weight: bold; }
+  .game-popup .popup-sub .loss { color: #ff8888; font-weight: bold; }
+
+  .level-up-choices {
+    display: flex; gap: 14px;
+    margin-top: 6px;
+  }
+  .choice-card {
+    flex: 1;
+    padding: 18px 12px;
+    background: #25252a;
+    border: 2px solid #444;
+    border-radius: 6px;
+    color: #ddd;
+    font-family: monospace;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+  .choice-card:hover { background: #2e2e36; transform: translateY(-2px); }
+  .choice-card.up:hover   { border-color: #88ccff; }
+  .choice-card.down:hover { border-color: #ff77aa; }
+  .choice-emoji { font-size: 48px; line-height: 1; margin-bottom: 8px; }
+  .choice-title {
+    font-size: 14px; font-weight: bold;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .choice-card.up   .choice-title { color: #cce8ff; }
+  .choice-card.down .choice-title { color: #ffaadd; }
+  .choice-effect {
+    font-size: 11px;
+    color: #aaa;
+    line-height: 1.5;
+  }
+  .choice-effect .gain { color: #88ff88; font-weight: bold; }
+  .choice-effect .loss { color: #ff8888; font-weight: bold; }
+
+  /* Revive modal rows */
+  #revive-list {
+    display: flex; flex-direction: column; gap: 6px;
+    margin-bottom: 10px;
+  }
+  .revive-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px;
+    background: #25252a;
+    border: 1px solid #444;
+    border-radius: 4px;
+  }
+  .revive-name {
+    color: #fff; font-size: 13px;
+    font-weight: bold;
+  }
+  .revive-btn {
+    padding: 6px 14px;
+    background: #4cc9f0;
+    color: #000;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
+  .revive-btn:hover:not(:disabled) { background: #6cd9ff; }
+  .revive-btn:disabled {
+    background: #4a4a52;
+    color: #888;
+    cursor: not-allowed;
+  }
+  .revive-continue {
+    width: 100%;
+    padding: 8px;
+    background: transparent;
+    color: #aaa;
+    border: 1px solid #555;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+  }
+  .revive-continue:hover {
+    color: #fff;
+    border-color: #888;
+  }
+
+  .menu-button {
+    margin-top: 8px;
+    padding: 12px 28px;
+    background: #4cc9f0;
+    color: #000;
+    border: none;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    cursor: pointer;
+    align-self: center;
+  }
+  .menu-button:hover:not(:disabled) { background: #6cd9ff; }
+  .menu-button:disabled { background: #555; color: #888; cursor: wait; }
+
+  #status {
+    margin-top: 12px; padding: 8px 12px;
+    font-family: monospace; font-size: 12px;
+    background: #222; border: 1px solid #444; color: #ccc;
+    max-width: 760px;
+  }
+  #error {
+    margin-top: 12px; padding: 12px 16px;
+    background: #3a1010; border: 1px solid #802020; color: #ffb0b0;
+    font-family: monospace; font-size: 13px;
+    max-width: 760px; white-space: pre-wrap; display: none;
+  }
+  canvas { display: block; }
+  kbd { background: #333; padding: 2px 6px; border-radius: 3px; font-family: monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+  <h1 style="font-family: monospace; letter-spacing: 2px; margin: 4px 0;">LEVEL DOWN</h1>
+  <p>
+    <kbd>Left-click</kbd> move &nbsp;·&nbsp;
+    <kbd>I</kbd> inventory &nbsp;·&nbsp;
+    <kbd>C</kbd> attributes &nbsp;·&nbsp;
+    <kbd>WASD</kbd>/<kbd>Arrows</kbd> manual (dev) &nbsp;·&nbsp;
+    <kbd>B</kbd> tile browser
+  </p>
+  <div class="game-wrapper">
+    <div id="game"></div>
+
+    <div id="start-menu" class="open">
+      <h1 id="game-title" aria-label="LEVEL DOWN"></h1>
+
+      <section id="menu-intro">
+        <p class="intro-text">
+          Lead three heroes through procedurally-generated dungeons.
+          Battle monsters, loot chests, level up, and see how deep
+          you can go.
+        </p>
+        <button id="start-button" class="menu-button" disabled>LOADING…</button>
+      </section>
+
+      <section id="hero-names" hidden>
+        <h3>Name your heroes</h3>
+        <div class="name-input-row">
+          <span class="role-label">Knight</span>
+          <input type="text" id="name-knight" maxlength="14" value="Knight" />
+        </div>
+        <div class="name-input-row">
+          <span class="role-label">Mage</span>
+          <input type="text" id="name-mage" maxlength="14" value="Mage" />
+        </div>
+        <div class="name-input-row">
+          <span class="role-label">Cleric</span>
+          <input type="text" id="name-cleric" maxlength="14" value="Cleric" />
+        </div>
+
+        <div class="hero-tips">
+          <h3>A few quick tips</h3>
+          <ul>
+            <li>Press <kbd>I</kbd> for inventory, <kbd>C</kbd> for your character sheet.</li>
+            <li>Your <strong>Score Multiplier</strong> (×) starts at 1.00 and scales every point you earn.</li>
+            <li>Defeat every monster and collect every chest to advance to the next level.</li>
+            <li>Each level-up after the first lets you pick <span class="emoji">😇</span> <strong>Level UP</strong> (stats + <span class="loss">−0.10×</span>) or <span class="emoji">😈</span> <strong>LEVEL DOWN</strong> (no stats + <span class="gain">+1.00×</span>).</li>
+            <li><strong>Feed the Demon:</strong> drag unwanted loot into the discard slot for <span class="gain">+0.01×</span> per modifier tier.</li>
+            <li>After clearing a level, you can revive a fallen hero for <span class="loss">−0.50×</span>.</li>
+          </ul>
+        </div>
+
+        <button id="begin-button" class="menu-button">BEGIN ADVENTURE</button>
+      </section>
+    </div>
+
+    <!-- Attributes sheet (C key): read-only Stats + Resistances. -->
+    <div id="attributes-sheet" class="game-sheet">
+      <header>
+        <h2>ATTRIBUTES</h2>
+        <span class="hint">press <kbd>C</kbd> to close</span>
+      </header>
+
+      <!-- Score Multiplier panel sits in the upper-left and lists
+           every gain / loss applied this run. Populated by
+           character-sheet.js's refreshScoreMulti. -->
+      <section class="score-multi-panel">
+        <div class="score-multi-header">
+          <h3>Score Multiplier</h3>
+          <span class="score-multi-value" id="score-multi-value">1.00×</span>
+        </div>
+        <ul class="score-multi-history" id="score-multi-history"></ul>
+      </section>
+
+      <div class="character-grid">
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-0">Hero A</h3>
+          <div class="role">Knight</div>
+
+          <h4>Stats</h4>
+          <div class="stats-grid">
+            <div class="stat-row" id="stat-strength-0"><span class="stat-label">STR</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-agility-0"><span class="stat-label">AGI</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-intelligence-0"><span class="stat-label">INT</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-resolve-0"><span class="stat-label">RES</span><span class="stat-value">—</span></div>
+          </div>
+
+          <h4>Resistances</h4>
+          <div class="resistances-grid" id="resistances-0"></div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-0">Preferred distance</label>
+            <input type="range" id="pref-dist-0" min="0" max="200" value="32" />
+            <span id="pref-dist-0-value">32 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="flee-hp-0">Flee when HP below</label>
+            <input type="range" id="flee-hp-0" min="0" max="100" value="20" />
+            <span id="flee-hp-0-value">20 %</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-0"></div>
+        </div>
+
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-1">Hero B</h3>
+          <div class="role">Mage</div>
+
+          <h4>Stats</h4>
+          <div class="stats-grid">
+            <div class="stat-row" id="stat-strength-1"><span class="stat-label">STR</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-agility-1"><span class="stat-label">AGI</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-intelligence-1"><span class="stat-label">INT</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-resolve-1"><span class="stat-label">RES</span><span class="stat-value">—</span></div>
+          </div>
+
+          <h4>Resistances</h4>
+          <div class="resistances-grid" id="resistances-1"></div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-1">Preferred distance</label>
+            <input type="range" id="pref-dist-1" min="0" max="200" value="120" />
+            <span id="pref-dist-1-value">120 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="flee-hp-1">Flee when HP below</label>
+            <input type="range" id="flee-hp-1" min="0" max="100" value="30" />
+            <span id="flee-hp-1-value">30 %</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-1"></div>
+        </div>
+
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-2">Hero C</h3>
+          <div class="role">Cleric</div>
+
+          <h4>Stats</h4>
+          <div class="stats-grid">
+            <div class="stat-row" id="stat-strength-2"><span class="stat-label">STR</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-agility-2"><span class="stat-label">AGI</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-intelligence-2"><span class="stat-label">INT</span><span class="stat-value">—</span></div>
+            <div class="stat-row" id="stat-resolve-2"><span class="stat-label">RES</span><span class="stat-value">—</span></div>
+          </div>
+
+          <h4>Resistances</h4>
+          <div class="resistances-grid" id="resistances-2"></div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-2">Preferred distance</label>
+            <input type="range" id="pref-dist-2" min="0" max="200" value="80" />
+            <span id="pref-dist-2-value">80 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="flee-hp-2">Flee when HP below</label>
+            <input type="range" id="flee-hp-2" min="0" max="100" value="30" />
+            <span id="flee-hp-2-value">30 %</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inventory sheet (I key): Personality, Skills, Equipment, shared bag. -->
+    <div id="inventory-sheet" class="game-sheet">
+      <header>
+        <h2>INVENTORY</h2>
+        <span class="hint">press <kbd>I</kbd> to close</span>
+      </header>
+
+      <div class="character-grid">
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-inv-0">Hero A</h3>
+          <div class="role">Knight</div>
+
+          <h4>Equipment <span class="stats-summary" id="stats-summary-0">no bonuses</span></h4>
+          <div class="equipment-grid">
+            <div class="slot drop-target" id="slot-weapon-0"
+                 data-target-type="equip" data-target-char="0" data-target-slot="weapon">
+              <div class="slot-label">WEAPON</div>
+            </div>
+            <div class="slot drop-target" id="slot-armor-0"
+                 data-target-type="equip" data-target-char="0" data-target-slot="armor">
+              <div class="slot-label">ARMOR</div>
+            </div>
+            <div class="slot drop-target" id="slot-helmet-0"
+                 data-target-type="equip" data-target-char="0" data-target-slot="helmet">
+              <div class="slot-label">HELMET</div>
+            </div>
+            <div class="slot drop-target" id="slot-accessory-0"
+                 data-target-type="equip" data-target-char="0" data-target-slot="accessory">
+              <div class="slot-label">ACCESSORY</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-inv-1">Hero B</h3>
+          <div class="role">Mage</div>
+
+          <h4>Equipment <span class="stats-summary" id="stats-summary-1">no bonuses</span></h4>
+          <div class="equipment-grid">
+            <div class="slot drop-target" id="slot-weapon-1"
+                 data-target-type="equip" data-target-char="1" data-target-slot="weapon">
+              <div class="slot-label">WEAPON</div>
+            </div>
+            <div class="slot drop-target" id="slot-armor-1"
+                 data-target-type="equip" data-target-char="1" data-target-slot="armor">
+              <div class="slot-label">ARMOR</div>
+            </div>
+            <div class="slot drop-target" id="slot-helmet-1"
+                 data-target-type="equip" data-target-char="1" data-target-slot="helmet">
+              <div class="slot-label">HELMET</div>
+            </div>
+            <div class="slot drop-target" id="slot-accessory-1"
+                 data-target-type="equip" data-target-char="1" data-target-slot="accessory">
+              <div class="slot-label">ACCESSORY</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="character-col">
+          <h3 class="hero-name" id="hero-name-inv-2">Hero C</h3>
+          <div class="role">Cleric</div>
+
+          <h4>Equipment <span class="stats-summary" id="stats-summary-2">no bonuses</span></h4>
+          <div class="equipment-grid">
+            <div class="slot drop-target" id="slot-weapon-2"
+                 data-target-type="equip" data-target-char="2" data-target-slot="weapon">
+              <div class="slot-label">WEAPON</div>
+            </div>
+            <div class="slot drop-target" id="slot-armor-2"
+                 data-target-type="equip" data-target-char="2" data-target-slot="armor">
+              <div class="slot-label">ARMOR</div>
+            </div>
+            <div class="slot drop-target" id="slot-helmet-2"
+                 data-target-type="equip" data-target-char="2" data-target-slot="helmet">
+              <div class="slot-label">HELMET</div>
+            </div>
+            <div class="slot drop-target" id="slot-accessory-2"
+                 data-target-type="equip" data-target-char="2" data-target-slot="accessory">
+              <div class="slot-label">ACCESSORY</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="shared-inventory">
+        <h3>Inventory <span class="inv-count" id="inventory-count">0/12</span></h3>
+        <div id="inventory-grid"></div>
+        <div id="trash-slot" class="trash-slot drop-target" data-target-type="trash">
+          <div class="trash-label">FEED THE DEMON</div>
+          <div class="trash-hint">drop items here for +0.01× Score Multi per modifier tier</div>
+        </div>
+        <div class="inv-hint">drag items between bag and gear slots — gear slots only accept matching types</div>
+      </section>
+    </div>
+
+    <!-- Level-up choice modal. Pops on every level-up after the
+         first; the first (Lv1→Lv2) is auto-applied as Level UP with
+         no multi penalty. Scene wires up the two buttons in create(). -->
+    <div id="level-up-modal" class="game-popup">
+      <h2>LEVEL <span id="level-up-modal-level">?</span> EARNED</h2>
+      <p class="popup-sub">The party crossed an XP threshold. Choose how to take it:</p>
+      <div class="level-up-choices">
+        <button id="choice-level-up" class="choice-card up">
+          <div class="choice-emoji">😇</div>
+          <div class="choice-title">Level UP</div>
+          <div class="choice-effect">Apply stat growth<br /><span class="loss">−0.10× Score Multi</span></div>
+        </button>
+        <button id="choice-level-down" class="choice-card down">
+          <div class="choice-emoji">😈</div>
+          <div class="choice-title">LEVEL DOWN</div>
+          <div class="choice-effect">Skip stat growth<br /><span class="gain">+1.00× Score Multi</span></div>
+        </button>
+      </div>
+    </div>
+
+    <!-- Revive modal. Shown after each level-clear if at least one
+         hero is dead. Scene populates the list dynamically. -->
+    <div id="revive-modal" class="game-popup">
+      <h2>FALLEN HEROES</h2>
+      <p class="popup-sub">
+        Score Multi remaining: <span id="revive-multi">1.00×</span>.
+        Revive a hero for <span class="loss">−0.50×</span>, or move on.
+      </p>
+      <div id="revive-list"></div>
+      <button id="revive-continue" class="revive-continue">Continue without reviving</button>
+    </div>
+
+  </div>
+  <div id="status">Loading game...</div>
+  <div id="error"></div>
+
+  <script>
+    // Dev cache buster. Python's http.server doesn't send Cache-Control
+    // headers, so once the browser caches a module, plain reloads keep
+    // returning the stale copy. We work around it by injecting an
+    // importmap that rewrites every src/*.js URL with a per-load
+    // version query, forcing a fresh fetch each time the page loads.
+    // Remove this block once we move to a real dev server.
+    (() => {
+      const v = Date.now();
+      const names = [
+        'main', 'scene', 'config', 'assets', 'map', 'monsters',
+        'map-generator', 'menu',
+        'personality', 'skills', 'tags', 'inventory', 'items',
+        'item-generator', 'character-sheet', 'path',
+        'hud', 'tile-browser', 'personas',
+      ];
+      const imports = {};
+      for (const n of names) imports['./src/' + n + '.js'] = './src/' + n + '.js?v=' + v;
+      const im = document.createElement('script');
+      im.type = 'importmap';
+      im.textContent = JSON.stringify({ imports });
+      document.head.appendChild(im);
+      const entry = document.createElement('script');
+      entry.type = 'module';
+      entry.textContent = "import('./src/main.js');";
+      document.head.appendChild(entry);
+    })();
+  </script>
+</body>
+</html>

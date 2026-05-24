@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/Users/maxcalabro/Documents/Claude Game/.claude\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(rm -rf /tmp/claude-game/src)",
+      "Bash(mkdir -p /tmp/claude-game/src)",
+      "Bash(cp \"/Users/maxcalabro/Documents/Claude Game/game-starter.html\" /tmp/claude-game/index.html)",
+      "Bash(cp \"/Users/maxcalabro/Documents/Claude Game\"/src/*.js /tmp/claude-game/src/)",
+      "Read(//private/tmp/claude-game/**)",
+      "Bash(python3)",
+      "Bash(cp \"/Users/maxcalabro/Documents/Claude Game/src/map.js\" /tmp/claude-game/src/map.js)",
+      "Bash(curl -sI http://127.0.0.1:8765/src/main.js)",
+      "Bash(curl -s http://127.0.0.1:8765/src/main.js)",
+      "Bash(cp \"/Users/maxcalabro/Documents/Claude Game/game-starter.html\" /tmp/claude-game/index.html && cp \"/Users/maxcalabro/Documents/Claude Game\"/src/*.js /tmp/claude-game/src/ && ls -la /tmp/claude-game/src/)",
+      "Bash(grep -c '^.*$' \"/Users/maxcalabro/Documents/Claude Game/src/map.js\")",
+      "Bash(awk '/^export const MAP_MEADOW/,/^];/' \"/Users/maxcalabro/Documents/Claude Game/src/map.js\")",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(node --check src/skills.js)",
+      "Bash(node --check src/items.js)",
+      "Bash(node --check src/item-generator.js)",
+      "Bash(node --check src/scene.js)",
+      "Bash(node --check src/character-sheet.js)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(command -v python3)",
+      "Bash(Score:\" \"/Users/maxcalabro/Documents/Claude Game/src/scene.js\")",
+      "Bash(grep -n \"scoreText.setText\\\\|`Score:\" \"/Users/maxcalabro/Documents/Claude Game/src/scene.js\")",
+      "Bash(awk 'NR>=1755 && NR<=1956 {next} {print}' src/scene.js)",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}
