@@ -540,8 +540,14 @@ export function showCharacterComment(scene, character, text) {
 // triggers the scene's level advancement.
 export function showLevelCompleteMessage(scene) {
   const cam = scene.cameras.main;
+  // setScrollFactor(0) below makes the text's coordinates
+  // screen-relative, so we need the screen centre (cam.width/2,
+  // cam.height/2). cam.midPoint returns *world* coordinates of the
+  // camera centre — combining that with scrollFactor=0 places the
+  // text at "world centre, treated as screen coords", which sits
+  // way off-screen the moment the camera has scrolled.
   const text = scene.add.text(
-    cam.midPoint.x, cam.midPoint.y,
+    cam.width / 2, cam.height / 2,
     'LEVEL ' + scene.mapLevel + ' COMPLETED',
     {
       font: 'bold 36px monospace', fill: '#88ccff',
@@ -577,15 +583,19 @@ export function showLevelUpMessage(scene, choice) {
   const multiLine = isDown ? '+1.00× Score Multi' : '−0.10× Score Multi';
   const fill = isDown ? '#ff77aa' : '#ffe066';
   const multiFill = isDown ? '#88ff88' : '#ff8888';
+  // Screen-space coords because setScrollFactor(0) below — see the
+  // note in showLevelCompleteMessage for the cam.midPoint pitfall.
+  const cx = cam.width / 2;
+  const cy = cam.height / 2;
   const headlineText = scene.add.text(
-    cam.midPoint.x, cam.midPoint.y - 50, headline,
+    cx, cy - 50, headline,
     {
       font: 'bold 22px monospace', fill,
       stroke: '#000', strokeThickness: 4,
     },
   ).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH.modal).setAlpha(0);
   const multiText = scene.add.text(
-    cam.midPoint.x, cam.midPoint.y - 22, multiLine,
+    cx, cy - 22, multiLine,
     {
       font: 'bold 16px monospace', fill: multiFill,
       stroke: '#000', strokeThickness: 3,

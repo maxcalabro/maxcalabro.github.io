@@ -25,7 +25,8 @@ import {
 } from './inventory.js';
 import { TILES, PACK, assetPath } from './assets.js';
 import {
-  ALL_TAGS, TAG_DISPLAY, SCALING_TAGS, applyDamageFormula,
+  ALL_TAGS, TAG_DISPLAY, DAMAGE_TYPES, DAMAGE_TYPE_DISPLAY,
+  SCALING_TAGS, applyDamageFormula,
   effectiveStat, RESOLVE_RES_PER_TAG, DEFENSE_RES_PER_TAG,
   AGILITY_ATTACK_SPEED_PER_POINT,
 } from './tags.js';
@@ -280,14 +281,27 @@ function buildSkillCard(skill, character) {
   header.appendChild(totalEl);
   card.appendChild(header);
 
-  if (skill.tags && skill.tags.length) {
+  // Tag badges: damage type first (highlighted), then the skill
+  // tags. Either may be absent (heal / buff skills have no damage
+  // type; some utility skills carry no tags at all).
+  const hasDamageType = !!skill.damageType;
+  const hasSkillTags = skill.tags && skill.tags.length > 0;
+  if (hasDamageType || hasSkillTags) {
     const tagsRow = document.createElement('div');
     tagsRow.className = 'skill-card-tags';
-    for (const tag of skill.tags) {
-      const badge = document.createElement('span');
-      badge.className = 'tag-badge';
-      badge.textContent = TAG_LABELS[tag] || tag;
-      tagsRow.appendChild(badge);
+    if (hasDamageType) {
+      const dmgBadge = document.createElement('span');
+      dmgBadge.className = 'tag-badge tag-badge-damage';
+      dmgBadge.textContent = TAG_LABELS[skill.damageType] || skill.damageType;
+      tagsRow.appendChild(dmgBadge);
+    }
+    if (hasSkillTags) {
+      for (const tag of skill.tags) {
+        const badge = document.createElement('span');
+        badge.className = 'tag-badge';
+        badge.textContent = TAG_LABELS[tag] || tag;
+        tagsRow.appendChild(badge);
+      }
     }
     card.appendChild(tagsRow);
   }
@@ -331,7 +345,9 @@ function buildSkillCard(skill, character) {
 function computeDamageBreakdown(skill, character) {
   const weaponBonus = character ? equipmentBonus(character.equipment, 'damage') : 0;
   const base = (skill.damage || 0) + weaponBonus;
-  const perHit = applyDamageFormula(base, skill.tags, character, null);
+  const perHit = applyDamageFormula(
+    base, skill.damageType, skill.tags, character, null,
+  );
   const cdMs = effectiveCooldownMs(skill, character);
   const dps = cdMs > 0 ? perHit * 1000 / cdMs : 0;
 
@@ -341,10 +357,13 @@ function computeDamageBreakdown(skill, character) {
   } else {
     contributions.push(`base ${skill.damage}`);
   }
-  // Per-tag stat scaling. The SCALING_TAGS map drives this — same
-  // source the damage formula uses, so the breakdown can't drift
-  // out of sync with the actual hit.
-  for (const tag of skill.tags || []) {
+  // Stat scaling — checked against both the damage type and each
+  // skill tag (same source the damage formula uses, so the
+  // breakdown can't drift from what combat actually deals).
+  const scalingTags = [];
+  if (skill.damageType) scalingTags.push(skill.damageType);
+  if (skill.tags) scalingTags.push(...skill.tags);
+  for (const tag of scalingTags) {
     const scaling = SCALING_TAGS[tag];
     if (!scaling) continue;
     const stat = effectiveStat(character, scaling.stat);
@@ -356,17 +375,17 @@ function computeDamageBreakdown(skill, character) {
       ` scaling)`,
     ]);
   }
-  // Per-tag flat gear damage. dmg_<tag> bonuses add unconditionally
-  // and also extend the effective tag set (see tags.js
-  // applyDamageFormula). We list them here so the player sees the
-  // extra fire damage on their sword.
+  // Per-type flat gear damage. dmg_<type> bonuses each add their
+  // own independent damage source (see applyDamageFormula). Only
+  // damage types are iterated — skill tags don't have flat damage
+  // modifiers in the gear pool.
   if (character) {
-    for (const tag of ALL_TAGS) {
-      const bonus = equipmentBonus(character.equipment, 'dmg_' + tag);
+    for (const type of DAMAGE_TYPES) {
+      const bonus = equipmentBonus(character.equipment, 'dmg_' + type);
       if (bonus <= 0) continue;
       contributions.push([
         `+${bonus} `,
-        { text: TAG_LABELS[tag] || tag, cls: 'skill-contrib-tag' },
+        { text: TAG_LABELS[type] || type, cls: 'skill-contrib-tag' },
         ` (gear)`,
       ]);
     }
@@ -434,13 +453,15 @@ function statShortLabel(stat) {
 
 // Build the per-character resistances grid the first time, then keep
 // it in sync with character.resistances on subsequent refreshes.
+// Only DAMAGE_TYPE_DISPLAY is iterated — the skill tags (Melee /
+// Ranged / Magic) don't carry resistances under the new system.
 function refreshResistances() {
   partyRef.forEach((char, i) => {
     const grid = document.getElementById(`resistances-${i}`);
     if (!grid) return;
-    if (grid.children.length !== TAG_DISPLAY.length) {
+    if (grid.children.length !== DAMAGE_TYPE_DISPLAY.length) {
       grid.innerHTML = '';
-      for (const { tag, short, label } of TAG_DISPLAY) {
+      for (const { tag, short, label } of DAMAGE_TYPE_DISPLAY) {
         const cell = document.createElement('div');
         cell.className = 'resistance-cell';
         cell.title = label; // hover for full name
@@ -451,22 +472,22 @@ function refreshResistances() {
         grid.appendChild(cell);
       }
     }
-    // Display effective per-tag resistance: class baseline + Resolve
-    // (base + gear) * RESOLVE_RES_PER_TAG + gear Defense *
-    // DEFENSE_RES_PER_TAG + tag-specific gear bonus. Matches what the
-    // damage formula in tags.js uses, so the listed % is what an
-    // incoming single-tag attack of that type would actually be
-    // reduced by.
+    // Display effective resistance per damage type: class baseline
+    // + Resolve (base + gear) × RESOLVE_RES_PER_TAG + Defense
+    // (gear) × DEFENSE_RES_PER_TAG + gear bonus for this damage
+    // type. Mirrors computeResistance in tags.js exactly: Resolve
+    // and Defense bonuses apply ONCE per incoming attack now, so
+    // they're added once per displayed row.
     const resistances = char.resistances || {};
     const resolve = effectiveStat(char, 'resolve');
     const defense = char.equipment ? equipmentBonus(char.equipment, 'defense') : 0;
-    const perTagBonus = resolve * RESOLVE_RES_PER_TAG
+    const flatBonus = resolve * RESOLVE_RES_PER_TAG
       + defense * DEFENSE_RES_PER_TAG;
     for (const cell of grid.children) {
       const tag = cell.dataset.tag;
       const base = Number(resistances[tag] || 0);
       const itemBonus = char.equipment ? equipmentBonus(char.equipment, tag) : 0;
-      const total = base + perTagBonus + itemBonus;
+      const total = base + flatBonus + itemBonus;
       const valueEl = cell.querySelector('.resistance-value');
       const pct = Math.round(total * 100);
       valueEl.textContent = (pct > 0 ? '+' : '') + pct + '%';
@@ -862,6 +883,10 @@ function performMove(srcData, tgtData) {
       sceneRef.applyScoreMultiChange(
         delta, `Fed the Demon: ${srcItem.name}`, 'feed',
       );
+      // Floating "+0.0X× Score Multi" badge above the trash slot
+      // so the player sees the multi gain land at the moment they
+      // drop the item.
+      showTrashMultiPopup(delta);
     }
     setLocation(srcData, null);
     return;
@@ -882,4 +907,21 @@ function sameLocation(a, b) {
     && a.targetChar === b.targetChar
     && a.targetSlot === b.targetSlot
     && a.targetInv === b.targetInv;
+}
+
+// Append a floating "+0.0X× Score Multi" badge above the trash slot.
+// Pure CSS animation (see .multi-popup in game-starter.html) handles
+// the pop-in / float-up / fade-out; we only schedule the element's
+// removal so the DOM doesn't slowly fill up with finished popups.
+function showTrashMultiPopup(delta) {
+  const trash = document.getElementById('trash-slot');
+  if (!trash) return;
+  const popup = document.createElement('div');
+  popup.className = 'multi-popup ' + (delta >= 0 ? 'gain' : 'loss');
+  const sign = delta >= 0 ? '+' : '−';
+  popup.textContent = `${sign}${Math.abs(delta).toFixed(2)}× Score Multi`;
+  trash.appendChild(popup);
+  // Matches the CSS animation duration (1.6 s) — strip the node a
+  // hair later so the last frame doesn't snap away mid-fade.
+  setTimeout(() => { if (popup.parentNode) popup.remove(); }, 1700);
 }

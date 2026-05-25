@@ -1,25 +1,43 @@
-// World layouts.
+// World layouts and pre-made template snippets.
 //
-// Each map is a 40-wide × 30-tall grid. To swap worlds, change
-// the `MAP` assignment at the bottom of this file — no other
-// code touches the map by name.
+// Adventure runs use procgen maps from map-generator.js; the named
+// exports below remain as hand-authored snapshots that could be
+// dropped in as templates or pasted into the generator for future
+// "structured rooms" features.
 //
 // Legend:
-//   .   grass             ,  grass alt
-//   -   path              T  tree (wall)
-//   B   bush (wall)       W  water (wall)
-//   H   house wall        R  house roof
-//   D   town door         d  dungeon door
-//   F   dungeon floor     f  dungeon floor alt
-//   #   dungeon wall      ~  dungeon wall top
-//   t   torch             c  coin
-//   s/g/z  enemy spawn (skeleton/goblin/zombie)
-//   P   player spawn      anything else → grass
+//   .  grass              ,  grass alt
+//   *  flowers            m  mushrooms           o  rock patch
 //
-// Path-width rule: every walkable channel is at least 2 cells
-// wide so the player can navigate it without pixel-perfect
-// movement. Wall clusters are placed in 2×2+ blocks and gaps
-// between them are kept ≥ 2 cells in both axes.
+//   Dirt path tiles (all walkable). Each char is picked by the map
+//   generator from the diagonal-quadrant rule so the dirt visual
+//   stays contiguous and the path has clean grass borders:
+//     -  full dirt
+//     ^  N-half dirt     v  S-half dirt
+//     <  W-half dirt     >  E-half dirt
+//     [  NW corner       ]  SE corner
+//     (  NE corner       )  SW corner
+//     1  inner corner — NW grass (rest dirt)
+//     2  inner corner — NE grass
+//     3  inner corner — SE grass
+//     4  inner corner — SW grass
+//
+//   Walls:
+//     T  tree             B  bush               W  water
+//     H  house wall       R  house roof         #  dungeon wall
+//     ~  dungeon wall top
+//   Doors / floors / decor:
+//     D  town door        d  dungeon door
+//     F  dungeon floor    f  dungeon floor alt
+//     t  torch
+//   Entities:
+//     c  chest            P  player spawn
+//     s / g / z / r  enemy spawn (skeleton / goblin / zombie / rat)
+//   anything else  → grass
+//
+// Walkability: the ONLY wall chars are `TBWHR#~`. Every other char
+// is passable, including all dirt / decoration / floor tiles.
+// Single-tile passages are fine — the A* pathfinder handles them.
 
 // ----------------------------------------------------------
 // MAP_MEADOW — open outdoor area with a small bush enclosure.

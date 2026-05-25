@@ -213,7 +213,10 @@ export const ITEMS = {
   },
   ring_iron_will: {
     type: 'accessory', name: 'Ring of Iron Will', image: 'item_accessory',
-    stats: { resolve: 2, magic: 0.10 },
+    // Previously had a `magic: 0.10` resistance that became dead
+    // data when MAGIC stopped being a damage type. Rolled into
+    // extra Resolve so the ring still carries a defensive feel.
+    stats: { resolve: 4 },
   },
   cloak_bear: {
     type: 'accessory', name: 'Cloak of the Bear', image: 'item_accessory',

@@ -13,6 +13,7 @@
 // became the main experience.
 
 import { generateMap } from './map-generator.js';
+import { startTitleMelody, stopTitleMelody } from './sounds.js';
 
 // initStartMenu wires the controls and calls `onStart(config)` when
 // the player presses BEGIN ADVENTURE. The config object has shape:
@@ -40,6 +41,10 @@ export function initStartMenu(onStart) {
     // setTimeout works around the hidden→visible transition; without
     // it some browsers don't actually focus.
     setTimeout(() => nameInputs.Knight.focus(), 0);
+    // First user click of the page — also the first chance the
+    // browser will let us produce audio. Kick off the title melody
+    // here; it'll loop until Begin Adventure stops it.
+    startTitleMelody();
   });
 
   // Stage 2 → game start. Pressing Enter in any name input also
@@ -52,6 +57,8 @@ export function initStartMenu(onStart) {
       Cleric: (nameInputs.Cleric.value || '').trim() || 'Cleric',
     };
     menu.classList.remove('open');
+    // Title melody has done its job — game audio takes over.
+    stopTitleMelody();
     onStart({
       mode: 'adventure',
       level: 1,

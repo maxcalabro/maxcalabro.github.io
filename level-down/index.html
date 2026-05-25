@@ -170,6 +170,14 @@
     letter-spacing: 0.5px;
     text-transform: uppercase;
   }
+  /* Damage-type badge — highlighted so the player can read the
+     skill's resistance type at a glance vs. the descriptive skill
+     tags (Melee / Ranged / Magic) that follow it. */
+  .tag-badge-damage {
+    color: #ffe0a0;
+    background: #4a3422;
+    font-weight: bold;
+  }
   .skill-card-line {
     font-size: 10px;
     color: #888;
@@ -329,8 +337,10 @@
     font-style: italic;
   }
 
-  /* Trash slot — drop items here to delete them. */
+  /* Trash slot — drop items here to delete them. Relative so the
+     floating multi-popup can absolute-position relative to it. */
   .trash-slot {
+    position: relative;
     margin-top: 8px;
     padding: 8px 12px;
     background: #2a1818;
@@ -346,6 +356,31 @@
     margin-top: 2px;
     color: #884444; font-size: 9px;
     font-style: italic;
+  }
+
+  /* Floating "+0.0X× Score Multi" popup that appears above the
+     trash slot when an item is fed to the demon. Pure CSS animation
+     so the JS just appends and removes the element. */
+  .multi-popup {
+    position: absolute;
+    left: 50%; top: -4px;
+    transform: translate(-50%, 0);
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 14px;
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+    z-index: 5;
+    animation: multi-popup-anim 1.6s ease-out forwards;
+  }
+  .multi-popup.gain { color: #88ff88; }
+  .multi-popup.loss { color: #ff8888; }
+  @keyframes multi-popup-anim {
+    0%   { opacity: 0; transform: translate(-50%, 8px) scale(0.7); }
+    20%  { opacity: 1; transform: translate(-50%, -4px) scale(1.1); }
+    35%  { opacity: 1; transform: translate(-50%, -10px) scale(1.0); }
+    100% { opacity: 0; transform: translate(-50%, -42px) scale(1.0); }
   }
 
   /* Start menu (shown on load until START is clicked). */
@@ -648,7 +683,13 @@
   }
 
   .menu-button {
-    margin-top: 8px;
+    /* `display: block` + auto horizontal margins centre the button
+       within whatever block container it sits in. The previous
+       `align-self: center` only worked when the parent was a flex
+       container — which the menu's <section> wrappers aren't, so
+       the button was left-aligned by default. */
+    display: block;
+    margin: 12px auto 0;
     padding: 12px 28px;
     background: #4cc9f0;
     color: #000;
@@ -659,7 +700,6 @@
     font-weight: bold;
     letter-spacing: 2px;
     cursor: pointer;
-    align-self: center;
   }
   .menu-button:hover:not(:disabled) { background: #6cd9ff; }
   .menu-button:disabled { background: #555; color: #888; cursor: wait; }
@@ -994,7 +1034,7 @@
         'map-generator', 'menu',
         'personality', 'skills', 'tags', 'inventory', 'items',
         'item-generator', 'character-sheet', 'path',
-        'hud', 'tile-browser', 'personas',
+        'hud', 'tile-browser', 'personas', 'sounds',
       ];
       const imports = {};
       for (const n of names) imports['./src/' + n + '.js'] = './src/' + n + '.js?v=' + v;

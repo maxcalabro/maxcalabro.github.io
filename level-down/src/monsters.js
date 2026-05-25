@@ -26,7 +26,8 @@ export const MONSTER_TYPES = {
       [TAGS.PHYSICAL]: -0.1,
       [TAGS.BLEEDING]: 1.0,
     },
-    attackTags: [TAGS.PHYSICAL, TAGS.MELEE],
+    attackDamageType: TAGS.PHYSICAL,
+    attackSkillTags: [TAGS.MELEE],
   },
   goblin: {
     displayName: 'Goblin',
@@ -39,7 +40,8 @@ export const MONSTER_TYPES = {
     resistances: {
       [TAGS.POISON]: 0.2,
     },
-    attackTags: [TAGS.PHYSICAL, TAGS.MELEE],
+    attackDamageType: TAGS.PHYSICAL,
+    attackSkillTags: [TAGS.MELEE],
   },
   zombie: {
     displayName: 'Zombie',
@@ -55,7 +57,8 @@ export const MONSTER_TYPES = {
       [TAGS.POISON]: 0.9,
       [TAGS.BLEEDING]: 0.5,
     },
-    attackTags: [TAGS.PHYSICAL, TAGS.MELEE],
+    attackDamageType: TAGS.PHYSICAL,
+    attackSkillTags: [TAGS.MELEE],
   },
   rat: {
     displayName: 'Rat',
@@ -72,7 +75,8 @@ export const MONSTER_TYPES = {
       [TAGS.LIGHTNING]: -0.1,
       [TAGS.POISON]: 0.2,
     },
-    attackTags: [TAGS.PHYSICAL, TAGS.MELEE],
+    attackDamageType: TAGS.PHYSICAL,
+    attackSkillTags: [TAGS.MELEE],
   },
 };
 
@@ -118,6 +122,7 @@ export function statsFor(typeKey, mapLevel = 1) {
     damage: Math.max(1, Math.round(archetype.damage * dmgMult)),
     points: Math.max(1, Math.round((archetype.points || 1) * ptsMult)),
     resistances: { ...(archetype.resistances || {}) },
-    attackTags: [...(archetype.attackTags || [])],
+    attackDamageType: archetype.attackDamageType,
+    attackSkillTags: [...(archetype.attackSkillTags || [])],
   };
 }

@@ -12,15 +12,21 @@
 //     produce a natural inner/outer engagement band.
 //   - color: used both for the cast effect and the floating damage
 //     number's tint
-//   - tags: TAGS array. Drives stat scaling and resistance via
-//     applyDamageFormula in tags.js.
+//   - damageType (optional): one of DAMAGE_TYPES (physical / fire /
+//     poison / lightning / cold / bleeding). Every offensive skill
+//     sets exactly one; resistance lookup uses this. Heal / buff
+//     skills omit it.
+//   - tags: array of SKILL_TAGS (Melee / Ranged / Magic). Purely
+//     descriptive — drives stat scaling via SCALING_TAGS and is the
+//     hook for future buffs like "+25% magic damage". Never affects
+//     resistance.
 //   - damage: nominal base damage (omitted for non-damage skills).
 //   - targetType: 'enemy' (default) or 'self' or 'ally'.
 //   - buff: optional { stats: {…}, durationMs } for self-buff skills.
 //   - cast(scene, caster, target?): performs the effect.
 //
 // Damage skills end with `scene.damageEnemy(caster, target, this)` so
-// the formula in tags.js can read both base damage and tags. AoE
+// the formula in tags.js can read both damageType and tags. AoE
 // skills loop over the enemy group and call damageEnemy per target.
 
 import { TILE, DEPTH } from './config.js';
@@ -47,7 +53,8 @@ export const SKILLS = {
     range: TILE * 1.3,
     damage: 2,
     color: 0xcccccc,
-    tags: [TAGS.PHYSICAL, TAGS.MELEE],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
     cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
   },
   throw_rock: {
@@ -59,7 +66,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 5,
     color: 0xaaaaaa,
-    tags: [TAGS.PHYSICAL, TAGS.RANGED],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.RANGED],
     cast(scene, caster, target) { projectile(scene, caster, target, this, { radius: 4 }); },
   },
 
@@ -74,7 +82,8 @@ export const SKILLS = {
     range: TILE * 1.6,
     damage: 10,
     color: 0xffffff,
-    tags: [TAGS.PHYSICAL, TAGS.MELEE],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
     cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
   },
   cleave: {
@@ -87,7 +96,8 @@ export const SKILLS = {
     range: TILE * 2.0,
     damage: 15,
     color: 0xffaa66,
-    tags: [TAGS.PHYSICAL, TAGS.MELEE],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
     // 120-degree cone.
     coneHalfAngle: Math.PI / 3,
     cast(scene, caster, target) {
@@ -120,7 +130,8 @@ export const SKILLS = {
     range: TILE * 1.3,
     damage: 6,
     color: 0xffeecc,
-    tags: [TAGS.PHYSICAL, TAGS.MELEE],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
     cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
   },
   bonk: {
@@ -134,7 +145,8 @@ export const SKILLS = {
     range: TILE * 1.4,
     damage: 8,
     color: 0xddddff,
-    tags: [TAGS.PHYSICAL, TAGS.MELEE],
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
     cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
   },
 
@@ -150,7 +162,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 80,
     color: 0xff8800,
-    tags: [TAGS.FIRE, TAGS.RANGED, TAGS.MAGIC],
+    damageType: TAGS.FIRE,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
     aoeRadius: TILE * 2.1,
     cast(scene, caster, target) {
       projectile(scene, caster, target, this, {
@@ -188,7 +201,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 25,
     color: 0xff8800,
-    tags: [TAGS.FIRE, TAGS.RANGED, TAGS.MAGIC],
+    damageType: TAGS.FIRE,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
     aoeRadius: TILE * 0.3,
     cast(scene, caster, target) {
       projectile(scene, caster, target, this, {
@@ -227,7 +241,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 60,
     color: 0xaaccff,
-    tags: [TAGS.LIGHTNING, TAGS.RANGED, TAGS.MAGIC],
+    damageType: TAGS.LIGHTNING,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
     halfWidth: TILE * 0.8,
     cast(scene, caster, target) {
       const dx = target.x - caster.x;
@@ -273,7 +288,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 12,
     color: 0x88ccff,
-    tags: [TAGS.COLD, TAGS.RANGED, TAGS.MAGIC],
+    damageType: TAGS.COLD,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
     slowFactor: 0.5,
     slowDurationMs: 1500,
     cast(scene, caster, target) {
@@ -308,7 +324,8 @@ export const SKILLS = {
     minRange: TILE * 2,
     damage: 15,
     color: 0xddeeff,
-    tags: [TAGS.LIGHTNING, TAGS.RANGED, TAGS.MAGIC],
+    damageType: TAGS.LIGHTNING,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
     cast(scene, caster, target) {
       projectile(scene, caster, target, this, {
         radius: 5,

@@ -56,6 +56,7 @@ import {
   showHitSpark,
 } from './hud.js';
 import { shuffledPersonas, pickComment } from './personas.js';
+import { playMelee, playMagic, playHeal, playLoot } from './sounds.js';
 
 // Per-character spawn config. Defaults to two distinctly-flavored
 // templates so the player can immediately feel the contrast between
@@ -63,22 +64,24 @@ import { shuffledPersonas, pickComment } from './personas.js';
 // Per-class baseline resistances. Items will stack on top of these
 // to drive the "resistance tuning" part of the strategy. Negative
 // values are vulnerabilities — a Mage's frail body is easier to cut.
+// Class resistances. Keys must be DAMAGE_TYPES — skill tags
+// (Melee / Ranged / Magic) don't have resistance entries; the old
+// "Magic resistance" rolls were dropped in the damage-system split.
 const KNIGHT_RESISTANCES = {
   [TAGS.PHYSICAL]: 0.10,   // armor training
   [TAGS.BLEEDING]: 0.10,   // tough skin
-  [TAGS.MAGIC]:    -0.10,  // no magical training
 };
 const MAGE_RESISTANCES = {
   [TAGS.PHYSICAL]: -0.10,  // frail
-  [TAGS.FIRE]:     0.10,   // fire affinity from spellcraft
+  [TAGS.FIRE]:     0.10,   // elemental affinity from spellcraft
   [TAGS.COLD]:     0.10,
-  [TAGS.MAGIC]:    0.15,
+  [TAGS.LIGHTNING]: 0.05,
 };
 const CLERIC_RESISTANCES = {
-  [TAGS.MAGIC]:    0.15,   // attuned to magic in general
   [TAGS.FIRE]:     0.05,
   [TAGS.COLD]:     0.05,
   [TAGS.POISON]:   0.10,
+  [TAGS.BLEEDING]: 0.05,
 };
 
 // `statsPerLevel` is *both* the level-1 starting block and the
@@ -156,6 +159,78 @@ function shuffleArray(arr) {
 }
 
 // Short label for a stat key (used in transient combat popups).
+// Map cell character → ground tile key (the always-drawn floor
+// layer). Anything not listed falls through to a deterministic mix
+// of grass / grass-alt so unknown chars still render reasonably.
+//
+// Dirt tile naming convention (Kenney sheet): "dirt_in_<edge>" means
+// the dirt fills that part of the tile — east is the right half,
+// southeast is just the SE quadrant, etc. "grass_in_<edge>" tiles
+// are the inverse: only that one corner is grass, the rest is dirt
+// (used at inner corners where a path bends).
+//
+// The map generator picks each path cell's tile via the diagonal
+// quadrant rule: a quadrant is dirt iff the cell DIAGONALLY at that
+// corner is also a path cell. The chars below cover every reachable
+// combination of the four quadrants the generator can produce.
+const GROUND_TILE_BY_CHAR = {
+  // Plain ground
+  '.': null,  // default grass (computed below — too many cells to enumerate)
+  ',': 'town_grass_alt',
+  '*': 'town_flowers',
+  'm': 'town_mushrooms',
+  'o': 'town_rock_patch',
+
+  // Dirt path interior and edges
+  '-': 'town_dirt_full',         // all 4 quadrants dirt
+  '<': 'town_dirt_in_west',      // W half dirt (NW + SW)
+  '>': 'town_dirt_in_east',      // E half dirt (NE + SE)
+  '^': 'town_dirt_in_north',     // N half dirt (NW + NE)
+  'v': 'town_dirt_in_south',     // S half dirt (SW + SE)
+  '[': 'town_dirt_in_northwest', // only NW quadrant dirt
+  ']': 'town_dirt_in_southeast', // only SE quadrant dirt
+  '(': 'town_dirt_in_northeast', // only NE quadrant dirt
+  ')': 'town_dirt_in_southwest', // only SW quadrant dirt
+
+  // Inner-corner tiles — three quadrants dirt, one quadrant grass.
+  // Used where a path bends and the grass "intrudes" into one corner.
+  '1': 'town_grass_in_northwest', // NW grass, rest dirt
+  '2': 'town_grass_in_northeast', // NE grass, rest dirt
+  '3': 'town_grass_in_southeast', // SE grass, rest dirt
+  '4': 'town_grass_in_southwest', // SW grass, rest dirt
+};
+// Dungeon chars all draw on the dungeon floor. Trees / bushes / etc.
+// keep grass as their ground (those chars are walls, handled in the
+// switch below — but they still need a floor underneath).
+const DUNGEON_GROUND_CHARS = 'F#~dft';
+
+function pickGroundKey(ch, x, y) {
+  if (DUNGEON_GROUND_CHARS.indexOf(ch) >= 0) {
+    return (x + y) % 3 === 0 ? 'dun_floor_alt' : 'dun_floor';
+  }
+  if (ch === 'f') return 'dun_floor_alt';
+  const named = GROUND_TILE_BY_CHAR[ch];
+  if (named) return named;
+  // Default: outdoor grass with a sprinkle of the alt variant. The
+  // hash is deterministic so re-renders match.
+  return (x * 7 + y * 13) % 5 === 0 ? 'town_grass_alt' : 'town_grass';
+}
+
+// Picks an audio cue for a skill at fire-time. Priority:
+//   1. Anything with a `healing` field → heal chime.
+//   2. Anything tagged Magic → magic whoosh (fireball, ice knife,
+//      shock, heals already caught above, etc.).
+//   3. Everything else → melee thud (punch, slice, cleave, jab,
+//      bonk, throw_rock).
+// Guard / non-damage utility skills with no tags fall through to
+// the thud, which sounds reasonable for a power-up cast too.
+function playSkillSound(skill) {
+  if (!skill) return;
+  if (typeof skill.healing === 'number') { playHeal(); return; }
+  if (skill.tags && skill.tags.includes(TAGS.MAGIC)) { playMagic(); return; }
+  playMelee();
+}
+
 function statShortLabel(stat) {
   if (stat === 'damage') return 'DMG';
   if (stat === 'defense') return 'DEF';
@@ -532,17 +607,12 @@ export function makeGameScene(config) {
     }
 
     placeCell(ch, x, y) {
-      // Ground layer.
-      let groundKey;
-      if ('F#~dft'.indexOf(ch) >= 0) {
-        groundKey = (x + y) % 3 === 0 ? 'dun_floor_alt' : 'dun_floor';
-      } else if (ch === '-') {
-        groundKey = 'town_path';
-      } else if (ch === 'f') {
-        groundKey = 'dun_floor_alt';
-      } else {
-        groundKey = (x * 7 + y * 13) % 5 === 0 ? 'town_grass_alt' : 'town_grass';
-      }
+      // Ground layer. The lookup table below maps every "ground-style"
+      // map char to a tile key. Unknown chars fall through to grass.
+      // Dirt-edge tiles (< > v [ ]) are walkable — they're decorative
+      // path edges drawn by the map generator to make winding paths
+      // look natural.
+      const groundKey = pickGroundKey(ch, x, y);
       this.placeImage(groundKey, x, y, DEPTH.ground);
 
       // Monster spawn (data-driven — see monsters.js).
@@ -552,9 +622,17 @@ export function makeGameScene(config) {
         return;
       }
 
-      // Static decor / walls.
+      // Static decor / walls. Tree, bush, and water are static walls.
+      // Trees pick from four variants so a generated grove doesn't
+      // look like a uniform stamp — same deterministic hash as the
+      // grass-alt sprinkle so re-renders stay stable.
       switch (ch) {
-        case 'T': this.placePhys(this.walls, 'town_tree',       x, y, DEPTH.walls); break;
+        case 'T': {
+          const variants = ['town_yellow_tree', 'town_yellow_tree_2', 'town_green_tree', 'town_green_tree_2'];
+          const key = variants[(x * 7 + y * 13) % variants.length];
+          this.placePhys(this.walls, key, x, y, DEPTH.walls);
+          break;
+        }
         case 'B': this.placePhys(this.walls, 'town_bush',       x, y, DEPTH.walls); break;
         case 'W': this.placePhys(this.walls, 'town_water',      x, y, DEPTH.walls); break;
         case 'H': this.placePhys(this.walls, 'town_house_wall', x, y, DEPTH.walls); break;
@@ -567,6 +645,8 @@ export function makeGameScene(config) {
         case 'c': this.placeChest(x, y); break;
         // 'P' is handled in buildMap — the party always spawns from
         // PARTY_TEMPLATES with the P cell determining where.
+        // Dirt / flowers / mushrooms / rocks are pure ground; the
+        // groundKey lookup above already drew them.
       }
     }
 
@@ -631,7 +711,8 @@ export function makeGameScene(config) {
       e.speed = stats.speed;
       e.aggroRange = stats.aggroRange;
       e.resistances = stats.resistances;
-      e.attackTags = stats.attackTags;
+      e.attackDamageType = stats.attackDamageType;
+      e.attackSkillTags = stats.attackSkillTags;
       e.points = stats.points || 1;
       e.dying = false;
       // Pathfinding state — enemies recompute toward the nearest
@@ -1188,6 +1269,12 @@ export function makeGameScene(config) {
           }
         }
 
+        // Audio cue for the skill we just fired. Heals get the
+        // chime, anything magic-tagged gets the synth whoosh, and
+        // everything else (melee weapons, thrown rocks) gets the
+        // percussive thud.
+        if (fired) playSkillSound(skill);
+
         // Commit window: while castTimeMs is in effect the caster
         // can't move (handled in updateCharacterMovement) and can't
         // start another skill (the early return above).
@@ -1231,7 +1318,9 @@ export function makeGameScene(config) {
       // resistance on top.
       const weapon = caster ? equipmentBonus(caster.equipment, 'damage') : 0;
       const base = (skill.damage || 0) + weapon;
-      const dealt = applyDamageFormula(base, skill.tags, caster, enemy);
+      const dealt = applyDamageFormula(
+        base, skill.damageType, skill.tags, caster, enemy,
+      );
       enemy.hp -= dealt;
       showDamageNumber(this, enemy, dealt, skill.color || 0xffffff);
       // Star-burst impact spark on every hit — applies uniformly to
@@ -1908,8 +1997,8 @@ export function makeGameScene(config) {
     // do with their fallen heroes.
     loadNextMapLevel() {
       this.mapLevel += 1;
-      const width = 32 + 4 * this.mapLevel;
-      const height = 20 + 2 * this.mapLevel;
+      const width = 40; // + 2 * this.mapLevel;
+      const height = 30; // + 1 * this.mapLevel;
       const monsters = 4 * this.mapLevel;
       const loot = 4 + this.mapLevel;
       const newMap = generateMap({ width, height, monsters, loot });
@@ -2001,6 +2090,8 @@ export function makeGameScene(config) {
       // swag!" etc.). Offset upward from the item popup so the two
       // don't collide visually.
       showLootMessage(this, chestX, chestY - 8);
+      // Coin-ping chime to match the visual.
+      playLoot();
       // Update the panel immediately so an already-open sheet shows
       // the new item. Closed sheets also re-render on next open.
       refreshEquipment();
@@ -2050,8 +2141,9 @@ export function makeGameScene(config) {
       const defense = equipmentBonus(character.equipment, 'defense')
         + this.buffBonus(character, 'defense');
       const base = Math.max(0, (enemy.dmg || 1) - defense);
-      const tags = enemy.attackTags || [TAGS.PHYSICAL, TAGS.MELEE];
-      const damage = applyDamageFormula(base, tags, null, character);
+      const damageType = enemy.attackDamageType || TAGS.PHYSICAL;
+      const skillTags = enemy.attackSkillTags || [TAGS.MELEE];
+      const damage = applyDamageFormula(base, damageType, skillTags, null, character);
       character.hp -= damage;
       character.invuln = true;
       character.setTint(0xff6666);
@@ -2083,7 +2175,12 @@ export function makeGameScene(config) {
 
     gameOver() {
       const cam = this.cameras.main;
-      this.add.text(cam.midPoint.x, cam.midPoint.y - 28, 'GAME OVER', {
+      // Screen-space centre because setScrollFactor(0) makes the
+      // coords screen-relative. cam.midPoint is in world coords and
+      // would shove this off-screen once the camera has scrolled.
+      const cx = cam.width / 2;
+      const cy = cam.height / 2;
+      this.add.text(cx, cy - 28, 'GAME OVER', {
         font: 'bold 48px monospace', fill: '#fff', stroke: '#000', strokeThickness: 4,
       }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH.modal);
       // End-of-run summary. Shows the level the party reached, the
@@ -2097,7 +2194,7 @@ export function makeGameScene(config) {
       const summary = this.mode === 'adventure'
         ? `Reached Map ${this.mapLevel}  ·  Party Lv ${this.trueLevel}${effStr}  ·  ${multiStr}  ·  Score: ${this.score}`
         : `Party Lv ${this.trueLevel}${effStr}  ·  ${multiStr}  ·  Score: ${this.score}`;
-      this.add.text(cam.midPoint.x, cam.midPoint.y + 24, summary, {
+      this.add.text(cx, cy + 24, summary, {
         font: '20px monospace', fill: '#ccc',
         stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH.modal);

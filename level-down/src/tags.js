@@ -23,14 +23,18 @@
 import { equipmentBonus } from './inventory.js';
 
 export const TAGS = Object.freeze({
-  // Damage types (resistance applies)
+  // Damage types — every attack has exactly one of these, and only
+  // these carry resistances. Listed in DAMAGE_TYPES below.
   PHYSICAL:  'physical',
   FIRE:      'fire',
   POISON:    'poison',
   LIGHTNING: 'lightning',
   COLD:      'cold',
   BLEEDING:  'bleeding',
-  // Delivery / source.
+  // Skill tags — descriptive only. They classify HOW a skill is
+  // delivered (Melee / Ranged) or its magical nature (Magic). No
+  // resistances; targeted by buffs like "+25% magic damage" that
+  // boost every skill carrying the tag. Listed in SKILL_TAGS below.
   MELEE:     'melee',
   RANGED:    'ranged',
   MAGIC:     'magic',
@@ -38,40 +42,59 @@ export const TAGS = Object.freeze({
 
 export const ALL_TAGS = Object.values(TAGS);
 
-// Display labels in canonical order. Character sheets and tooltips
-// iterate this so the order is consistent everywhere.
-export const TAG_DISPLAY = [
+// Damage-type tags ONLY. Targets carry resistance entries keyed by
+// these. Every offensive skill picks exactly one as its damageType.
+export const DAMAGE_TYPES = Object.freeze([
+  TAGS.PHYSICAL, TAGS.FIRE, TAGS.POISON,
+  TAGS.LIGHTNING, TAGS.COLD, TAGS.BLEEDING,
+]);
+
+// Skill tags ONLY. Purely descriptive — no resistance lookups, no
+// effect on damage by themselves. Buffs that scale "all magic" or
+// "all melee" hits read from this list.
+export const SKILL_TAGS = Object.freeze([
+  TAGS.MELEE, TAGS.RANGED, TAGS.MAGIC,
+]);
+
+// Display labels in canonical order, split by category. The
+// resistances panel iterates DAMAGE_TYPE_DISPLAY (6 entries); the
+// damage-breakdown card combines both lists so a Fireball can show
+// "Fire" + "Ranged" + "Magic" badges in one row.
+export const DAMAGE_TYPE_DISPLAY = [
   { tag: TAGS.PHYSICAL,  short: 'PHYS', label: 'Physical'  },
   { tag: TAGS.FIRE,      short: 'FIRE', label: 'Fire'      },
   { tag: TAGS.POISON,    short: 'POIS', label: 'Poison'    },
   { tag: TAGS.LIGHTNING, short: 'LITE', label: 'Lightning' },
   { tag: TAGS.COLD,      short: 'COLD', label: 'Cold'      },
   { tag: TAGS.BLEEDING,  short: 'BLED', label: 'Bleeding'  },
-  { tag: TAGS.MELEE,     short: 'MELE', label: 'Melee'     },
-  { tag: TAGS.RANGED,    short: 'RANG', label: 'Ranged'    },
-  { tag: TAGS.MAGIC,     short: 'MAGI', label: 'Magic'     },
 ];
+export const SKILL_TAG_DISPLAY = [
+  { tag: TAGS.MELEE,  short: 'MELE', label: 'Melee'  },
+  { tag: TAGS.RANGED, short: 'RANG', label: 'Ranged' },
+  { tag: TAGS.MAGIC,  short: 'MAGI', label: 'Magic'  },
+];
+// Backward-compat combined list — anything that wants every label
+// in one go (e.g. legacy iteration) reads this.
+export const TAG_DISPLAY = [...DAMAGE_TYPE_DISPLAY, ...SKILL_TAG_DISPLAY];
 
-// Tag → stat scaling. A skill's base damage gains
-// (caster.stats[stat] * perPoint) for every entry here whose tag is
-// on the skill. Tags not in this map are purely descriptive /
-// resistance-driving.
+// Tag → stat scaling. Each entry here adds
+// `effectiveStat(caster, stat) * perPoint` to a skill's base damage
+// when that tag is on the skill — either as the damage type or as
+// one of the skill tags. Tags not in this map don't add stat
+// scaling; they may still be present on a skill for buff targeting
+// or flavour.
 //
 // Stat→tag assignments:
-//   - Strength scales Physical and Bleeding (cuts and impact). Also
-//     contributes to maxHp via STRENGTH_HP_PER_POINT.
-//   - Intelligence scales Magic and every elemental type (fire,
-//     cold, lightning, poison). It also scales Heal — see
-//     scene.healAlly which uses the same perPoint coefficient.
-//   - Agility doesn't scale damage; it boosts movement speed via
-//     AGILITY_SPEED_PER_POINT (see below).
-//   - Resolve doesn't scale damage; it boosts HP via
-//     RESOLVE_HP_PER_POINT and adds resistance to every tag on an
-//     incoming attack (see computeResistance).
-//
-// A multi-tag skill stacks naturally: Fireball (Fire, Ranged,
-// Magic) gets Intelligence scaling twice — once for Fire and once
-// for Magic.
+//   - Strength scales Physical and Bleeding damage types (cuts and
+//     impact). Also contributes to maxHp via STRENGTH_HP_PER_POINT.
+//   - Intelligence scales Magic-tagged skills AND every elemental
+//     damage type (fire, cold, lightning, poison). A fire spell
+//     tagged Magic gets INT scaling twice — once for the Fire
+//     damage type and once for the Magic skill tag.
+//   - Agility doesn't scale damage; it boosts movement and attack
+//     speed via AGILITY_SPEED_PER_POINT / AGILITY_ATTACK_SPEED_PER_POINT.
+//   - Resolve doesn't scale damage; it boosts HP (RESOLVE_HP_PER_POINT)
+//     and adds resistance against incoming attacks (see computeResistance).
 export const SCALING_TAGS = Object.freeze({
   [TAGS.PHYSICAL]:  { stat: 'strength',     perPoint: 0.5 },
   [TAGS.BLEEDING]:  { stat: 'strength',     perPoint: 0.5 },
@@ -126,28 +149,30 @@ export function makeEmptyResistances() {
   return r;
 }
 
-// % damage reduction a target gets against a skill with the given
-// tags. Builds the resistance per-tag from:
-//   - target.resistances[tag] (class baseline + future modifiers)
+// % damage reduction a target gets against an attack of the given
+// damage type. Sums:
+//   - target.resistances[damageType] (class baseline + modifiers)
 //   - Resolve (both base stat AND gear bonus) × RESOLVE_RES_PER_TAG
 //   - gear Defense × DEFENSE_RES_PER_TAG
-//   - tag-specific gear bonus (e.g. an item with stats: { fire: 0.1 })
-// Sums across all tags on the skill, then caps. A target with no
-// `resistances` map or `stats.resolve` just contributes 0 from
-// those parts of the formula.
-export function computeResistance(target, tags) {
-  if (!target || !tags || tags.length === 0) return 0;
+//   - target's gear bonus to the damage type (e.g. mage_robe's
+//     `fire: 0.05` against a fire-damageType attack)
+// Then caps at MAX_DAMAGE_REDUCTION. Resolve and Defense each
+// contribute ONCE per attack — they used to be added per tag in
+// the previous multi-tag system, which produced unintentionally
+// huge resistances against multi-tagged skills like Fireball.
+//
+// damageType is a single string (one of DAMAGE_TYPES) or falsy.
+// A falsy damage type (e.g. for a heal) returns 0.
+export function computeResistance(target, damageType) {
+  if (!target || !damageType) return 0;
   const baseResolve = (target.stats && target.stats.resolve) || 0;
   const gearResolve = target.equipment ? equipmentBonus(target.equipment, 'resolve') : 0;
   const gearDefense = target.equipment ? equipmentBonus(target.equipment, 'defense') : 0;
-  const perTagBonus = (baseResolve + gearResolve) * RESOLVE_RES_PER_TAG
-    + gearDefense * DEFENSE_RES_PER_TAG;
-  let total = 0;
-  for (const tag of tags) {
-    const base = (target.resistances && target.resistances[tag]) || 0;
-    const itemBonus = target.equipment ? equipmentBonus(target.equipment, tag) : 0;
-    total += base + perTagBonus + itemBonus;
-  }
+  const resolveBonus = (baseResolve + gearResolve) * RESOLVE_RES_PER_TAG;
+  const defenseBonus = gearDefense * DEFENSE_RES_PER_TAG;
+  const base = (target.resistances && target.resistances[damageType]) || 0;
+  const itemBonus = target.equipment ? equipmentBonus(target.equipment, damageType) : 0;
+  let total = base + resolveBonus + defenseBonus + itemBonus;
   if (total > MAX_DAMAGE_REDUCTION) total = MAX_DAMAGE_REDUCTION;
   return total;
 }
@@ -164,44 +189,77 @@ export function effectiveStat(character, stat) {
 
 // Full damage pipeline. Returns an integer ≥ MIN_DAMAGE.
 //
-// baseDamage: the skill's nominal damage (plus any flat additions the
-//   scene wants to bake in — e.g. weapon damage from equipment).
-// tags: array of TAGS values on the skill / attack.
-// caster: any object with `.stats` and/or `.equipment`. Missing → no
-//   scaling. Gear stat bonuses (e.g. +1 strength from a sword) are
-//   read here too, so the same item that grants a skill can also
-//   improve its scaling.
-// target: any object with `.stats`, `.equipment`, and/or `.resistances`.
-export function applyDamageFormula(baseDamage, tags, caster, target) {
-  let dmg = baseDamage;
-
-  // Stat scaling per scaling-tag in the skill itself.
-  if (caster && tags) {
-    for (const tag of tags) {
-      const scaling = SCALING_TAGS[tag];
+// Damage is computed as the sum of independent damage sources, each
+// taxed by the target's resistance to its own type:
+//
+//   1. BASE source — the skill's nominal damage + flat weapon damage
+//      + stat scaling for any matching SCALING_TAGS entry on either
+//      the damageType or any of the skill tags. Taxed by the
+//      target's resistance to the SKILL'S damageType (single lookup,
+//      not per-tag).
+//
+//   2. GEAR per-type sources — every `dmg_<type>` modifier on the
+//      caster's equipment adds an independent damage source of that
+//      type, taxed by the target's resistance to that one type.
+//
+// Each source has at most one damage type, so resistance lookup is
+// a single `computeResistance(target, type)` call. The skill tags
+// (Melee / Ranged / Magic) never enter resistance — they're purely
+// descriptive (used by buffs like "+25% magic damage" that scale
+// every magic-tagged skill, regardless of its damage type).
+//
+// baseDamage:  skill's nominal damage + flat weapon damage
+// damageType:  one of DAMAGE_TYPES, or falsy for non-damage skills
+// skillTags:   array of skill-type tags (Melee, Ranged, Magic) —
+//              affect stat scaling via SCALING_TAGS but never
+//              resistance
+// caster:      any object with `.stats` and/or `.equipment`
+// target:      any object with `.stats`, `.equipment`, `.resistances`.
+//              null → no resistance applied (used by the character
+//              sheet's headline-damage display).
+export function applyDamageFormula(baseDamage, damageType, skillTags, caster, target) {
+  // ---- BASE source ----
+  let baseDmg = baseDamage;
+  if (caster) {
+    // Damage type can have a scaling entry (Physical → STR, Fire →
+    // INT, etc.). Skill tags can ALSO have scaling entries (Magic →
+    // INT). A Fireball with damageType=Fire and tags=[Ranged, Magic]
+    // therefore picks up INT scaling twice — once for Fire, once
+    // for Magic — preserving the previous combined scaling rate.
+    if (damageType) {
+      const scaling = SCALING_TAGS[damageType];
       if (scaling) {
-        dmg += effectiveStat(caster, scaling.stat) * scaling.perPoint;
+        baseDmg += effectiveStat(caster, scaling.stat) * scaling.perPoint;
+      }
+    }
+    if (skillTags) {
+      for (const tag of skillTags) {
+        const scaling = SCALING_TAGS[tag];
+        if (scaling) {
+          baseDmg += effectiveStat(caster, scaling.stat) * scaling.perPoint;
+        }
       }
     }
   }
+  const baseReduction = computeResistance(target, damageType);
+  let dmg = baseDmg * (1 - baseReduction);
 
-  // Gear damage bonuses (dmg_fire, dmg_poison, etc.) apply
-  // unconditionally — a sword with a "Fire Damage" modifier deals
-  // fire damage on a physical strike. Each bonus also widens the
-  // hit's effective tag set so the target's resistance for that
-  // damage type still applies.
-  const effective = new Set(tags || []);
+  // ---- Per-type gear-damage sources ----
+  // Each `dmg_<type>` modifier on equipment adds its own slice of
+  // damage of that type, taxed only by the target's resistance to
+  // that one type. Without this split, a +1 poison-damage modifier
+  // on a sword would make the ENTIRE swing poison-resistant, which
+  // counter-intuitively lowers net damage against poison-resistant
+  // targets like zombies.
   if (caster && caster.equipment) {
-    for (const tag of ALL_TAGS) {
-      const bonus = equipmentBonus(caster.equipment, 'dmg_' + tag);
+    for (const type of DAMAGE_TYPES) {
+      const bonus = equipmentBonus(caster.equipment, 'dmg_' + type);
       if (bonus > 0) {
-        dmg += bonus;
-        effective.add(tag);
+        const tagReduction = computeResistance(target, type);
+        dmg += bonus * (1 - tagReduction);
       }
     }
   }
 
-  const reduction = computeResistance(target, [...effective]);
-  dmg *= (1 - reduction);
   return Math.max(MIN_DAMAGE, Math.round(dmg));
 }
