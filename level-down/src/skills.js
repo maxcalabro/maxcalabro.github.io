@@ -94,7 +94,7 @@ export const SKILLS = {
   slice: {
     // Sword's bread-and-butter: fast, single target, modest damage.
     name: 'Slice',
-    cooldownMs: 300,
+    cooldownMs: 400,
     castTimeMs: 150,
     range: TILE * 1.6,
     damage: 10,
@@ -108,7 +108,7 @@ export const SKILLS = {
     // target and any other enemies inside the arc. Slower than Slice
     // and harder hitting, with a wider effective area against a pack.
     name: 'Cleave',
-    cooldownMs: 400,
+    cooldownMs: 600,
     castTimeMs: 250,
     range: TILE * 2.0,
     damage: 15,
@@ -142,7 +142,7 @@ export const SKILLS = {
     // Dagger's quick stab — very low cooldown, low damage. Stacks
     // small chip damage onto faster characters.
     name: 'Jab',
-    cooldownMs: 220,
+    cooldownMs: 300,
     castTimeMs: 120,
     range: TILE * 1.3,
     damage: 6,
@@ -157,7 +157,7 @@ export const SKILLS = {
     // conserve the slower main spell). Low damage by design — the
     // staff's value is in the magical skill it grants.
     name: 'Bonk',
-    cooldownMs: 400,
+    cooldownMs: 800,
     castTimeMs: 200,
     range: TILE * 1.4,
     damage: 8,

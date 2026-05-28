@@ -69,6 +69,17 @@ export const INDEPENDENCE_MIN = BUDDY_DISTANCE + TILE;   // 96 px
 // visible jitter.
 export const REGROUP_HYSTERESIS = TILE;                  // 32 px
 
+// Passive HP regeneration for party members. Every active hero heals
+// HP_REGEN_BASE_PER_SEC per second (0.5 = 1 HP every 2 s), plus
+// HP_REGEN_RESOLVE_PER_SEC per point of *effective* Resolve (base stat
+// + gear) — so tanky, high-Resolve heroes recover noticeably faster
+// (+1 HP/s for every 10 Resolve). Regen is accumulated as fractional
+// HP each frame and committed in whole points so the HP bar stays
+// integer (see scene.tickHpRegen). Always on, including in combat;
+// the base rate is slow enough not to trivialise fights.
+export const HP_REGEN_BASE_PER_SEC = 0.5;
+export const HP_REGEN_RESOLVE_PER_SEC = 0.1;
+
 // Per-character tints (rainbow palette). On creation each party
 // member draws one of these without replacement, then uses it for
 // their HP bar, hover-name label, and speech-bubble text. Mirrors the

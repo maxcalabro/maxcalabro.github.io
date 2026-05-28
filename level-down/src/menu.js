@@ -128,7 +128,7 @@ export function initStartMenu(onStart) {
     onStart({
       mode: 'adventure',
       level: 1,
-      map: generateMap({ monsters: 4, loot: 4 }),
+      map: generateMap({ monsters: 4, loot: 2 }),
       startClass: selectedClass,
       heroName,
       personalityChoice,

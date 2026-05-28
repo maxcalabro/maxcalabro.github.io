@@ -22,6 +22,7 @@ import {
   WANDER_MIN_DIST, WANDER_MAX_DIST, WANDER_MIN_REST, WANDER_MAX_REST,
   WANDER_GIVEUP_MS, WANDER_SPEED_FACTOR, POST_INTENT_REST,
   BUDDY_DISTANCE, INDEPENDENCE_MIN, REGROUP_HYSTERESIS, PARTY_COLORS,
+  HP_REGEN_BASE_PER_SEC, HP_REGEN_RESOLVE_PER_SEC,
 } from './config.js';
 import { TILES, PACK, assetPath } from './assets.js';
 import { makePersonality } from './personality.js';
@@ -514,6 +515,7 @@ export function makeGameScene(config) {
         this.updateCharacterSkills(c, time, delta);
       }
       this.tickPartySpeech(time);
+      this.tickHpRegen(delta);
       this.updateEnemies(time, delta);
       this.updateCameraTarget();
       updateHud(this);
@@ -833,6 +835,9 @@ export function makeGameScene(config) {
       // Regroup hysteresis flag — true while the character is actively
       // heading back to the group centre (see determineCharacterGoal).
       c.regrouping = false;
+      // Fractional HP accumulated by passive regen, committed to `hp`
+      // in whole points by tickHpRegen so the bar stays integer.
+      c.hpRegenAcc = 0;
       c.moveTarget = null;
       // Pathfinding state. Populated by recomputePathFor; consumed by
       // followPath. `tiles` is the waypoint list (tile coords), `index`
@@ -1782,6 +1787,28 @@ export function makeGameScene(config) {
       else if (character.hp > newMax) character.hp = newMax;
     }
 
+    // Passive HP regeneration. Every active, injured hero recovers
+    // HP_REGEN_BASE_PER_SEC + effectiveResolve * HP_REGEN_RESOLVE_PER_SEC
+    // hit points per second. We accumulate the fractional amount on
+    // hpRegenAcc and only commit whole points to `hp`, so the HP bar
+    // never shows decimals. Resting at full HP resets the accumulator so
+    // a freshly-damaged hero doesn't instantly pop a stored fraction.
+    tickHpRegen(delta) {
+      const dtSec = delta / 1000;
+      for (const c of this.party) {
+        if (!c.active) continue;
+        if (c.hp >= c.maxHp) { c.hpRegenAcc = 0; continue; }
+        const rate = HP_REGEN_BASE_PER_SEC
+          + effectiveStat(c, 'resolve') * HP_REGEN_RESOLVE_PER_SEC;
+        c.hpRegenAcc = (c.hpRegenAcc || 0) + rate * dtSec;
+        if (c.hpRegenAcc >= 1) {
+          const whole = Math.floor(c.hpRegenAcc);
+          c.hp = Math.min(c.maxHp, c.hp + whole);
+          c.hpRegenAcc -= whole;
+        }
+      }
+    }
+
     // ---- party chatter -----------------------------------
     //
     // Each character carries a hidden persona (assigned at creation)
@@ -2325,7 +2352,7 @@ export function makeGameScene(config) {
       const width = 40; // + 2 * this.mapLevel;
       const height = 30; // + 1 * this.mapLevel;
       const monsters = 4 * this.mapLevel;
-      const loot = 4 + this.mapLevel;
+      const loot = 2 + this.mapLevel;
       const newMap = generateMap({ width, height, monsters, loot });
       this.loadLevel(newMap);
       // The party grows one hero at a time: a second joins on map 2, a
