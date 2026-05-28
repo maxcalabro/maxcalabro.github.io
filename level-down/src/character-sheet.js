@@ -1,17 +1,20 @@
 // Two panels driven by this module:
-//   #attributes-sheet (C key, read-only): Stats + Resistances per
-//   character.
-//   #inventory-sheet (I key, interactive): Personality sliders,
-//   Skills, Equipment, shared Inventory grid, Trash slot.
+//   #attributes-sheet (C key, read-only): per-character Personality
+//   controls, Skills, Stats, Resistances + the run-wide Score
+//   Multiplier panel.
+//   #inventory-sheet (I key, interactive): Equipment slots + the
+//   shared Inventory grid and Trash slot.
 // They're mutually exclusive — opening one closes the other.
 //
 // DOM contract (defined in game-starter.html):
 //   - Attributes panel
+//     - Personality controls: #pref-dist-{i}, #independence-{i},
+//       #greed-{i} (sliders) + #target-mode-{i} (select)
+//     - Skill list container: #skills-{i}
 //     - Stat rows: #stat-{name}-{i} → .stat-value
 //     - Resistance grid container: #resistances-{i}
+//     - Score multiplier readout: #score-multi-value + #score-multi-history
 //   - Inventory panel
-//     - Personality sliders: #pref-dist-{i}, #flee-hp-{i}
-//     - Skill list container: #skills-{i}
 //     - Equipment slot containers: #slot-{slotName}-{i}
 //     - Inventory grid: #inventory-grid (12 cells built at runtime)
 //     - Inventory count: #inventory-count
@@ -53,6 +56,10 @@ let sceneRef = null;
 let onEquipChange = null;
 let initialized = false;
 let tooltipEl = null;
+// How many party columns have had their personality controls wired.
+// The party grows one hero at a time (maps 2 & 3); we only wire the
+// newly-added columns so we never double-bind a slider's listener.
+let wiredCount = 0;
 
 export function initCharacterSheets(party, sharedInventory, opts = {}) {
   partyRef = party;
@@ -65,11 +72,47 @@ export function initCharacterSheets(party, sharedInventory, opts = {}) {
   if (!initialized) {
     sheets.attributes.panel = document.getElementById('attributes-sheet');
     sheets.inventory.panel = document.getElementById('inventory-sheet');
-    party.forEach((char, i) => wireCharacterSliders(char, i));
     setupDragAndDrop();
     initialized = true;
   }
+  wirePendingColumns();
+  updateColumnVisibility();
   refreshAll();
+}
+
+// Wires the personality controls for any party columns added since the
+// last call — so a hero recruited mid-run gets working sliders without
+// re-binding the columns that were already set up.
+function wirePendingColumns() {
+  if (!partyRef) return;
+  for (let i = wiredCount; i < partyRef.length; i++) {
+    wireCharacterSliders(partyRef[i], i);
+  }
+  wiredCount = Math.max(wiredCount, partyRef.length);
+}
+
+// Called by the scene after a hero joins the party. Wires the new
+// column, reveals it, and re-renders everything.
+export function notifyPartyChanged() {
+  if (!partyRef) return;
+  wirePendingColumns();
+  updateColumnVisibility();
+  refreshAll();
+}
+
+// Hides any character columns beyond the current party size in both
+// sheets, so a 1- or 2-member party doesn't show stale placeholder
+// columns.
+function updateColumnVisibility() {
+  if (!partyRef) return;
+  for (const key of ['attributes', 'inventory']) {
+    const panel = sheets[key].panel;
+    if (!panel) continue;
+    const cols = panel.querySelectorAll('.character-col');
+    cols.forEach((col, i) => {
+      col.style.display = i < partyRef.length ? '' : 'none';
+    });
+  }
 }
 
 export function toggleAttributesSheet() { toggleSheet('attributes'); }
@@ -198,6 +241,12 @@ function refreshHeroNames() {
     const invEl = document.getElementById(`hero-name-inv-${i}`);
     if (attrEl) attrEl.textContent = name;
     if (invEl) invEl.textContent = name;
+    // Class label under the name — dynamic now that the player picks
+    // which class fills each column.
+    const roleEl = document.getElementById(`role-${i}`);
+    const roleInvEl = document.getElementById(`role-inv-${i}`);
+    if (roleEl) roleEl.textContent = char.role || '';
+    if (roleInvEl) roleInvEl.textContent = char.role || '';
   });
 }
 
@@ -259,14 +308,32 @@ function buildSkillCard(skill, character) {
     const { hps, contributions } = computeHealBreakdown(skill, character);
     totalEl.textContent = hps.toFixed(1) + ' HPS';
     lines.push(...contributions);
+  } else if (skill.aura) {
+    // Aura — a persistent field, no cooldown. Show the bonuses it
+    // grants and note its range / that it covers the whole party.
+    totalEl.classList.add('buff');
+    const parts = [];
+    for (const stat in skill.aura) {
+      parts.push('+' + Math.round(skill.aura[stat] * 100) + '% ' + statLabel(stat));
+    }
+    totalEl.textContent = parts.join(' ');
+    lines.push('Aura — boosts all allies in range (self included)');
   } else if (skill.buff) {
     totalEl.classList.add('buff');
     const parts = [];
-    for (const stat in skill.buff.stats) {
+    for (const stat in (skill.buff.stats || {})) {
       parts.push('+' + skill.buff.stats[stat] + ' ' + statLabel(stat));
+    }
+    for (const stat in (skill.buff.mult || {})) {
+      parts.push('×' + skill.buff.mult[stat] + ' ' + statLabel(stat));
     }
     const seconds = (skill.buff.durationMs / 1000).toFixed(1).replace(/\.0$/, '');
     totalEl.textContent = parts.join(' ') + ' · ' + seconds + 's';
+    // A Warcry empowers allies, not the caster — call that out so the
+    // player isn't surprised the wearer doesn't get the buff.
+    if (skill.warcry && !skill.includeCaster) {
+      lines.push('Warcry — buffs allies in range (not the caster)');
+    }
     // Show cooldown alongside the buff so the player can see how
     // often they'll get it back.
     const cdMs = effectiveCooldownMs(skill, character);
@@ -346,7 +413,7 @@ function computeDamageBreakdown(skill, character) {
   const weaponBonus = character ? equipmentBonus(character.equipment, 'damage') : 0;
   const base = (skill.damage || 0) + weaponBonus;
   const perHit = applyDamageFormula(
-    base, skill.damageType, skill.tags, character, null,
+    base, skill.damageType, skill.tags, character, null, skill.extraDamage,
   );
   const cdMs = effectiveCooldownMs(skill, character);
   const dps = cdMs > 0 ? perHit * 1000 / cdMs : 0;
@@ -387,6 +454,20 @@ function computeDamageBreakdown(skill, character) {
         `+${bonus} `,
         { text: TAG_LABELS[type] || type, cls: 'skill-contrib-tag' },
         ` (gear)`,
+      ]);
+    }
+  }
+  // Skill-intrinsic per-type extra damage. Same shape as gear
+  // bonuses but declared on the skill, so e.g. a future "Flaming
+  // Strike" skill would show the fire portion here.
+  if (skill.extraDamage) {
+    for (const type of DAMAGE_TYPES) {
+      const bonus = skill.extraDamage[type] || 0;
+      if (bonus <= 0) continue;
+      contributions.push([
+        `+${bonus} `,
+        { text: TAG_LABELS[type] || type, cls: 'skill-contrib-tag' },
+        ` (skill)`,
       ]);
     }
   }
@@ -594,6 +675,8 @@ function statLabel(k) {
   if (k === 'damage') return 'dmg';
   if (k === 'defense') return 'def';
   if (k === 'maxHp') return 'HP';
+  if (k === 'attack_speed') return 'atk speed';
+  if (k === 'speed') return 'move speed';
   return k;
 }
 
@@ -612,12 +695,36 @@ function wireCharacterSliders(char, i) {
     1, (v) => `${v} px`,
     char.personality.preferredDistance,
   );
-  wireSlider(
-    `flee-hp-${i}`,
-    char.personality, 'fleeAtHpFraction',
-    0.01, (v) => `${Math.round(v * 100)} %`,
-    char.personality.fleeAtHpFraction * 100,
+  wireSelect(
+    `target-mode-${i}`,
+    char.personality, 'targetMode',
+    char.personality.targetMode || 'closest',
   );
+  wireSlider(
+    `independence-${i}`,
+    char.personality, 'independence',
+    1, (v) => `${v} px`,
+    char.personality.independence,
+  );
+  wireSlider(
+    `greed-${i}`,
+    char.personality, 'greed',
+    1, (v) => `${v} px`,
+    char.personality.greed,
+  );
+}
+
+// Bind a <select> to a property on `obj`. Initial value defaults to
+// the current property value but a per-character starting choice
+// (e.g. from the pre-game personality menu) can be passed via the
+// `initial` argument.
+function wireSelect(id, obj, prop, initial) {
+  const select = document.getElementById(id);
+  if (!select) return;
+  if (typeof initial === 'string') select.value = initial;
+  const sync = () => { obj[prop] = select.value; };
+  select.addEventListener('change', sync);
+  sync();
 }
 
 function wireSlider(id, obj, prop, multiplier, formatter, initialSliderValue) {

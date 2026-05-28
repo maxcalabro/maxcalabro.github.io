@@ -217,7 +217,14 @@ export function effectiveStat(character, stat) {
 // target:      any object with `.stats`, `.equipment`, `.resistances`.
 //              null → no resistance applied (used by the character
 //              sheet's headline-damage display).
-export function applyDamageFormula(baseDamage, damageType, skillTags, caster, target) {
+// extraDamage: optional `{ [DAMAGE_TYPE]: amount }` map declared on
+//              the skill itself (separate from caster gear). Each
+//              entry adds its own damage source taxed by that one
+//              type's resistance. Used by enemy attacks that mix
+//              elements ("goblin arrow does physical + poison")
+//              without having to grow the skill's damageType into
+//              an array.
+export function applyDamageFormula(baseDamage, damageType, skillTags, caster, target, extraDamage) {
   // ---- BASE source ----
   let baseDmg = baseDamage;
   if (caster) {
@@ -254,6 +261,22 @@ export function applyDamageFormula(baseDamage, damageType, skillTags, caster, ta
   if (caster && caster.equipment) {
     for (const type of DAMAGE_TYPES) {
       const bonus = equipmentBonus(caster.equipment, 'dmg_' + type);
+      if (bonus > 0) {
+        const tagReduction = computeResistance(target, type);
+        dmg += bonus * (1 - tagReduction);
+      }
+    }
+  }
+
+  // ---- Per-type skill extra-damage sources ----
+  // Same shape as gear `dmg_<type>` bonuses, but declared on the
+  // skill itself. Used by enemy attacks that mix elements (e.g. a
+  // goblin's poison-tipped arrow does base physical damage AND a
+  // separately-resisted slice of poison). Player skills can also
+  // declare it if a future skill should bake in a per-type bonus.
+  if (extraDamage) {
+    for (const type of DAMAGE_TYPES) {
+      const bonus = extraDamage[type] || 0;
       if (bonus > 0) {
         const tagReduction = computeResistance(target, type);
         dmg += bonus * (1 - tagReduction);

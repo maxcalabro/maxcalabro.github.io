@@ -69,6 +69,20 @@ export const ITEMS = {
     skills: [{ id: 'jab', slot: 'primary' }],
   },
 
+  // ---- Bows (Arrow Shot) ----------------------------------------
+  // The Archer's starting weapon. Grants Arrow Shot in the primary
+  // slot; a small Agility bump leans into the class's speed identity.
+  short_bow: {
+    type: 'weapon', name: 'Short Bow', image: 'item_weapon',
+    stats: { damage: 1, agility: 1 },
+    skills: [{ id: 'arrow_shot', slot: 'primary' }],
+  },
+  long_bow: {
+    type: 'weapon', name: 'Long Bow', image: 'item_weapon',
+    stats: { damage: 2, agility: 1 },
+    skills: [{ id: 'arrow_shot', slot: 'primary' }],
+  },
+
   // ---- Staves (Bonk + element / heal) ---------------------------
   // Every staff melees with Bonk; the secondary / utility slot holds
   // the magical skill that gives the staff its identity.

@@ -22,12 +22,29 @@
 //     resistance.
 //   - damage: nominal base damage (omitted for non-damage skills).
 //   - targetType: 'enemy' (default) or 'self' or 'ally'.
-//   - buff: optional { stats: {…}, durationMs } for self-buff skills.
+//   - buff: optional { stats: {…}, mult: {…}, durationMs } for buff
+//     skills. `stats` are additive (e.g. +3 defense); `mult` are
+//     multiplicative (e.g. ×2 damage) — see scene.buffMultiplier.
 //   - cast(scene, caster, target?): performs the effect.
 //
-// Damage skills end with `scene.damageEnemy(caster, target, this)` so
-// the formula in tags.js can read both damageType and tags. AoE
-// skills loop over the enemy group and call damageEnemy per target.
+// Two skill *kinds* beyond the usual cast-and-hit:
+//   - Warcry: a cast skill that emanates from the caster and buffs
+//     allies within `range`. Marked with `warcry: true` and an
+//     `includeCaster` flag; its cast plays an expanding ring
+//     (warcryRing) and calls scene.applyWarcry. Fires like a 'self'
+//     skill (gated on an enemy being near so it isn't wasted).
+//   - Aura: a PASSIVE — never cast. Marked with an `aura` map of
+//     stat→bonus (keys match the gear-stat keys the speed pipelines
+//     read). Every frame scene.recomputeAuras grants the bonus to all
+//     allies (self included) within `range`. The skill loop skips
+//     anything carrying `aura`.
+//
+// Damage skills end with `scene.applyDamage(caster, target, this)` —
+// the scene dispatches to damageEnemy (player→enemy) or
+// damageCharacter (enemy→party) based on which group `target`
+// belongs to. The same SKILLS catalog is used for both directions,
+// so monsters share the player skill pipeline (see updateEnemies
+// in scene.js).
 
 import { TILE, DEPTH } from './config.js';
 import { TAGS } from './tags.js';
@@ -117,7 +134,7 @@ export const SKILLS = {
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
         if (Math.abs(diff) > this.coneHalfAngle) return;
-        scene.damageEnemy(caster, e, this);
+        scene.applyDamage(caster, e, this);
       });
     },
   },
@@ -148,6 +165,27 @@ export const SKILLS = {
     damageType: TAGS.PHYSICAL,
     tags: [TAGS.MELEE],
     cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
+  },
+
+  // ---- Bow attack ------------------------------------------------
+  // The Archer's bread-and-butter. A fast physical arrow with no
+  // minRange (so the archer can still fire when something closes to
+  // point-blank — kiting is driven by the Archer's preferredDistance,
+  // not a skill floor). Physical damage scales with Strength; the
+  // Archer's real edge is Agility, which speeds up both this attack
+  // (attack-speed) and their footwork (move-speed) so they can keep
+  // the range open and out-fire most enemies.
+  arrow_shot: {
+    name: 'Arrow Shot',
+    cooldownMs: 600,
+    castTimeMs: 120,
+    range: TILE * 6,
+    minRange: 0,
+    damage: 10,
+    color: 0xd8c070,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.RANGED],
+    cast(scene, caster, target) { projectile(scene, caster, target, this, { radius: 4 }); },
   },
 
   // ---- Staff / wand spells ---------------------------------------
@@ -185,7 +223,7 @@ export const SKILLS = {
           s.enemies.children.iterate((e) => {
             if (!e || !e.active || e.dying) return;
             const d = Math.hypot(e.x - tx, e.y - ty);
-            if (d <= skill.aoeRadius) s.damageEnemy(caster, e, skill);
+            if (d <= skill.aoeRadius) s.applyDamage(caster, e, skill);
           });
         },
       });
@@ -224,7 +262,7 @@ export const SKILLS = {
           s.enemies.children.iterate((e) => {
             if (!e || !e.active || e.dying) return;
             const d = Math.hypot(e.x - tx, e.y - ty);
-            if (d <= skill.aoeRadius) s.damageEnemy(caster, e, skill);
+            if (d <= skill.aoeRadius) s.applyDamage(caster, e, skill);
           });
         },
       });
@@ -274,7 +312,7 @@ export const SKILLS = {
       scene.enemies.children.iterate((e) => {
         if (!e || !e.active || e.dying) return;
         const d = pointToSegmentDistance(e.x, e.y, caster.x, caster.y, endX, endY);
-        if (d <= this.halfWidth) scene.damageEnemy(caster, e, this);
+        if (d <= this.halfWidth) scene.applyDamage(caster, e, this);
       });
     },
   },
@@ -442,6 +480,195 @@ export const SKILLS = {
     buff: { stats: { damage: 5 }, durationMs: 2500 },
     cast(scene, caster) { scene.applyBuff(caster, this.buff); },
   },
+
+  // ---- Helmet-granted --------------------------------------------
+  // Warcry: rallies the team. An expanding ring bursts from the caster
+  // and every OTHER ally within range gets a short multiplicative
+  // damage buff (×2). The caster is excluded (includeCaster:false) —
+  // it's a "lead the charge, empower the rest" effect. Fires like a
+  // self-skill: only when an enemy is within range, so it isn't wasted
+  // while wandering. Lives in the `head` skill slot (see scene.js).
+  strengthening_warcry: {
+    name: 'Strengthening Warcry',
+    cooldownMs: 12000,
+    castTimeMs: 250,
+    range: TILE * 5,
+    color: 0xff5544,
+    targetType: 'self',
+    tags: [],
+    warcry: true,
+    includeCaster: false,
+    buff: { mult: { damage: 2 }, durationMs: 4000 },
+    cast(scene, caster) {
+      warcryRing(scene, caster, this.range, this.color);
+      scene.applyWarcry(caster, this);
+    },
+  },
+
+  // Aura: a persistent field. Never cast — scene.recomputeAuras grants
+  // its bonuses to every ally (self included) inside `range` each
+  // frame. Keys in `aura` match the gear-stat keys the attack-speed /
+  // movement pipelines already read, so the bonus folds straight in.
+  // Each specific aura is deduped per character (can't be double-
+  // hasted). Lives in the `head` skill slot.
+  haste_aura: {
+    name: 'Haste Aura',
+    range: TILE * 5,
+    color: 0xffd23f,
+    tags: [],
+    aura: { attack_speed: 0.15, speed: 0.15 },
+  },
+
+  // ---- Enemy attacks --------------------------------------------
+  // These live in the same SKILLS catalog so the cast / damage /
+  // projectile pipeline is one system. Monsters carry one skill key
+  // (see monsters.js `skill`) and updateEnemies fires it at the
+  // nearest party member when the cooldown clears.
+  //
+  // `damage` on these is a fallback — scene.damageCharacter uses the
+  // monster archetype's `dmg` as base when present so map-level
+  // scaling carries through. `extraDamage` is a separately-resisted
+  // per-type bonus, used to model attacks that mix elements (a
+  // goblin's poison-tipped arrow, a skeleton's bone-chilling claw).
+
+  // Fast melee biter — rats and bats. Cooldown matches the player's
+  // invuln window so contact-range targets take steady damage.
+  bite: {
+    name: 'Bite',
+    cooldownMs: 500,
+    castTimeMs: 0,
+    range: TILE * 1.2,
+    damage: 3,
+    color: 0xff8888,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
+    cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
+  },
+
+  // Skeleton's signature claw — physical hit with a sliver of cold
+  // damage tacked on. The cold portion is taxed by the target's
+  // cold resistance independently.
+  claw_cold: {
+    name: 'Cold Claw',
+    cooldownMs: 700,
+    castTimeMs: 0,
+    range: TILE * 1.3,
+    damage: 2,
+    color: 0xaaddff,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
+    extraDamage: { [TAGS.COLD]: 2 },
+    cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
+  },
+
+  // Crab pincer — heavier physical hit with a bleeding side-effect.
+  pinch: {
+    name: 'Pinch',
+    cooldownMs: 1000,
+    castTimeMs: 0,
+    range: TILE * 1.3,
+    damage: 2,
+    color: 0xffaaaa,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
+    extraDamage: { [TAGS.BLEEDING]: 2 },
+    cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
+  },
+
+  // Slow shambling zombie melee. Lower cooldown than a rat bite so
+  // the zombie reads as a slow-but-scary threat rather than a
+  // chip-damage chip.
+  zombie_grab: {
+    name: 'Zombie Grab',
+    cooldownMs: 1200,
+    castTimeMs: 0,
+    range: TILE * 1.3,
+    damage: 5,
+    color: 0xaadd88,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.MELEE],
+    cast(scene, caster, target) { meleeSwing(scene, caster, target, this); },
+  },
+
+  // Plain ranged arrow — pure physical. Player-usable too if we add
+  // a bow item later (the skill stands on its own).
+  shoot_arrow: {
+    name: 'Shoot Arrow',
+    cooldownMs: 1000,
+    castTimeMs: 0,
+    range: TILE * 5,
+    minRange: 0,
+    damage: 3,
+    color: 0xc8a060,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.RANGED],
+    cast(scene, caster, target) { projectile(scene, caster, target, this, { radius: 4 }); },
+  },
+
+  // Goblin's poison-tipped arrow — same projectile look as
+  // shoot_arrow but with a separately-resisted poison rider.
+  goblin_shot: {
+    name: 'Poison Arrow',
+    cooldownMs: 1100,
+    castTimeMs: 0,
+    range: TILE * 5,
+    minRange: 0,
+    damage: 2,
+    color: 0xaacc66,
+    damageType: TAGS.PHYSICAL,
+    tags: [TAGS.RANGED],
+    extraDamage: { [TAGS.POISON]: 3 },
+    cast(scene, caster, target) { projectile(scene, caster, target, this, { radius: 4 }); },
+  },
+
+  // Spider venom — single-type poison ranged spit. No physical
+  // damage to balance the very high poison resistance some targets
+  // could carry; the player can shut it down with poison resist.
+  spider_spit: {
+    name: 'Venom Spit',
+    cooldownMs: 1300,
+    castTimeMs: 0,
+    range: TILE * 4,
+    minRange: 0,
+    damage: 3,
+    color: 0x88dd44,
+    damageType: TAGS.POISON,
+    tags: [TAGS.RANGED],
+    cast(scene, caster, target) { projectile(scene, caster, target, this, { radius: 5 }); },
+  },
+
+  // Evil wizard's fire bolt — single-target fire projectile with a
+  // bright burst on impact. Kept single-target (no AoE) so the
+  // wizard is a damage threat without needing the cleave-style
+  // group-iterate code.
+  wizard_fire: {
+    name: 'Wizard Fire',
+    cooldownMs: 2200,
+    castTimeMs: 0,
+    range: TILE * 6,
+    minRange: TILE * 2,
+    damage: 6,
+    color: 0xff8800,
+    damageType: TAGS.FIRE,
+    tags: [TAGS.RANGED, TAGS.MAGIC],
+    cast(scene, caster, target) {
+      projectile(scene, caster, target, this, {
+        radius: 6,
+        alpha: 0.95,
+        duration: 320,
+        onHit: (s, tx, ty, skill) => {
+          // Small impact burst — purely cosmetic since damage is
+          // single-target via the projectile's default path.
+          const burst = s.add.circle(tx, ty, 14, skill.color, 0.7)
+            .setDepth(DEPTH.fx);
+          s.tweens.add({
+            targets: burst, scale: 1.6, alpha: 0, duration: 280,
+            onComplete: () => burst.destroy(),
+          });
+        },
+      });
+    },
+  },
 };
 
 // ---- helpers (private to this module) --------------------
@@ -452,7 +679,7 @@ function meleeSwing(scene, caster, target, skill) {
   // dealt — that handles all the impact feedback in one place,
   // shared with ranged and AoE attacks. meleeSwing just lands the
   // hit; the spark does the visual work.
-  scene.damageEnemy(caster, target, skill);
+  scene.applyDamage(caster, target, skill);
 }
 
 // Filled cone fanning out from caster at the given orientation. Used
@@ -468,6 +695,21 @@ function coneSwing(scene, caster, angle, halfCone, range, color) {
   scene.tweens.add({
     targets: g, alpha: 0, duration: 420,
     onComplete: () => g.destroy(),
+  });
+}
+
+// Expanding ring centred on the caster — the visual for a Warcry.
+// Starts as a tiny disc and scales out to `range`, fading as it goes,
+// with a bright stroked edge so it reads as a pulse sweeping over the
+// allies it buffs.
+function warcryRing(scene, caster, range, color) {
+  const ring = scene.add.circle(caster.x, caster.y, range, color, 0.18)
+    .setDepth(DEPTH.fx);
+  ring.setStrokeStyle(3, color, 0.9);
+  ring.setScale(0.1);
+  scene.tweens.add({
+    targets: ring, scale: 1, alpha: 0, duration: 500,
+    onComplete: () => ring.destroy(),
   });
 }
 
@@ -528,7 +770,7 @@ function projectile(scene, caster, target, skill, opts = {}) {
         });
       } else {
         if (opts.onHit) opts.onHit(scene, tx, ty, skill);
-        if (!opts.skipTargetDamage) scene.damageEnemy(caster, target, skill);
+        if (!opts.skipTargetDamage) scene.applyDamage(caster, target, skill);
       }
     },
   });

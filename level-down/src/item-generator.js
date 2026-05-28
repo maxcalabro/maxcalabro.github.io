@@ -48,6 +48,10 @@ export const BASE_ITEMS = {
   mace:    { type: 'weapon', baseName: 'Mace',   image: 'item_weapon', skills: [{ id: 'slice',  slot: 'primary' }] },
   dagger:  { type: 'weapon', baseName: 'Dagger', image: 'item_weapon', skills: [{ id: 'jab',    slot: 'primary' }] },
 
+  // ---- Weapons — bows (Arrow Shot) ------------------------------
+  bow:     { type: 'weapon', baseName: 'Bow',     image: 'item_weapon', skills: [{ id: 'arrow_shot', slot: 'primary' }] },
+  longbow: { type: 'weapon', baseName: 'Longbow', image: 'item_weapon', skills: [{ id: 'arrow_shot', slot: 'primary' }] },
+
   // ---- Weapons — staves (Bonk + the staff's defining spell) ----
   fireball_staff:  { type: 'weapon', baseName: 'Fireball Staff',      image: 'item_weapon',
                      skills: [{ id: 'bonk', slot: 'primary' }, { id: 'fireball', slot: 'secondary' }] },
@@ -70,10 +74,17 @@ export const BASE_ITEMS = {
   platemail: { type: 'armor', baseName: 'Platemail', image: 'item_armor', skills: [{ id: 'guard', slot: 'defensive' }] },
 
   // ---- Helmets ---------------------------------------------------
+  // Cap / Hood are plain stat helmets. Helm grants a Strengthening
+  // Warcry (team ×2 damage burst); Crown grants a Haste Aura (passive
+  // +15% attack & move speed to nearby allies). Both live in the
+  // `head` skill slot so they never clobber weapon/armor/accessory
+  // skills.
   cap:    { type: 'helmet', baseName: 'Cap',    image: 'item_helmet' },
   hood:   { type: 'helmet', baseName: 'Hood',   image: 'item_helmet' },
-  helm:   { type: 'helmet', baseName: 'Helm',   image: 'item_helmet' },
-  crown:  { type: 'helmet', baseName: 'Crown',  image: 'item_helmet' },
+  helm:   { type: 'helmet', baseName: 'Helm',   image: 'item_helmet',
+            skills: [{ id: 'strengthening_warcry', slot: 'head' }] },
+  crown:  { type: 'helmet', baseName: 'Crown',  image: 'item_helmet',
+            skills: [{ id: 'haste_aura', slot: 'head' }] },
 
   // ---- Accessories -----------------------------------------------
   ring:     { type: 'accessory', baseName: 'Ring',     image: 'item_accessory', skills: [{ id: 'rejuvenation', slot: 'accessory' }] },

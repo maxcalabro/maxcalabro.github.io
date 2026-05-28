@@ -41,16 +41,23 @@ export const TILES = {
   dun_torch:       107,
 
   // Characters. `player` is the Knight (A), `player_b` the Mage (B),
-  // `player_c` the Cleric (C). Enemy sprites live alongside.
+  // `player_c` the Cleric (C), `player_d` the Archer. Enemy sprites
+  // live alongside. (To swap a sprite: press B in-game, hover a tile
+  // to read its number, update the value here.)
   player:          97,
   player_b:        84,
   player_c:        100,
+  player_d:        96,
 
   // Enemies
   enemy_skeleton:  121,
   enemy_goblin:    108,
   enemy_zombie:    109,
   enemy_rat:       124,
+  enemy_bat:       120,
+  enemy_crab:      110,
+  enemy_wizard:    111,
+  enemy_spider:    122,
 
   // Items. `chest` is currently a coin-style sprite (tile 89). To
   // swap in a more chest-looking tile, press B in-game to open the
@@ -111,10 +118,15 @@ export const PACK = {
   player:           'dungeon',
   player_b:         'dungeon',
   player_c:         'dungeon',
+  player_d:         'dungeon',
   enemy_skeleton:   'dungeon',
   enemy_goblin:     'dungeon',
   enemy_zombie:     'dungeon',
   enemy_rat:        'dungeon',
+  enemy_bat:        'dungeon',
+  enemy_crab:       'dungeon',
+  enemy_wizard:     'dungeon',
+  enemy_spider:     'dungeon',
   chest:            'dungeon',
 
   // Inventory icons (dungeon sheet)

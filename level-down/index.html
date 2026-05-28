@@ -84,6 +84,58 @@
   .character-col .slider-row input[type=range] { width: 100%; }
   .character-col .slider-row label { font-size: 10px; color: #bbb; }
   .character-col .slider-row span { font-size: 10px; text-align: right; color: #ddd; }
+  .character-col .slider-row select {
+    grid-column: 2 / span 2;
+    background: #1a1a1a;
+    color: #ddd;
+    border: 1px solid #444;
+    font-family: monospace;
+    font-size: 10px;
+    padding: 2px 4px;
+  }
+
+  /* Pre-game personality menu — three columns of starting-knob
+     controls. Reuses .slider-row markup for consistency with the
+     in-game character sheet. */
+  .personality-config {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 12px 0;
+    max-width: 760px;
+    width: 100%;
+  }
+  .personality-config-col {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 10px 12px;
+  }
+  .personality-config-col h4 {
+    margin: 0 0 8px 0;
+    color: #88aaff;
+    font-family: monospace;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .personality-config-col .slider-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(60px, 1fr) 38px;
+    gap: 6px;
+    align-items: center;
+    margin: 6px 0;
+  }
+  .personality-config-col .slider-row input[type=range] { width: 100%; }
+  .personality-config-col .slider-row label { font-size: 10px; color: #bbb; }
+  .personality-config-col .slider-row span { font-size: 10px; text-align: right; color: #ddd; }
+  .personality-config-col .slider-row select {
+    grid-column: 2 / span 2;
+    background: #111;
+    color: #ddd;
+    border: 1px solid #444;
+    font-family: monospace;
+    font-size: 11px;
+    padding: 3px 4px;
+  }
 
   /* Per-character stats — single-column list. */
   .stats-grid {
@@ -478,6 +530,44 @@
     border-color: #4cc9f0;
   }
 
+  /* Class picker — used both on the create-hero menu (#class-picker)
+     and in the in-game recruit modal (#recruit-classes). A row of
+     selectable cards; the chosen one gets a cyan highlight. */
+  .class-picker, .recruit-classes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 0;
+    max-width: 520px;
+  }
+  .class-card, .recruit-class {
+    text-align: left;
+    background: #1c1c20;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 8px 10px;
+    color: #ddd;
+    cursor: pointer;
+    font-family: monospace;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  .class-card:hover, .recruit-class:hover { background: #25252c; }
+  .class-card.selected, .recruit-class.selected {
+    border-color: #4cc9f0;
+    background: #16323c;
+  }
+  .class-card-name, .recruit-class-name {
+    color: #88ccff; font-weight: bold;
+    font-size: 13px; letter-spacing: 1px;
+  }
+  .class-card-stats, .recruit-class-stats {
+    color: #ffe34c; font-size: 10px; margin-top: 2px;
+  }
+  .class-card-blurb, .recruit-class-blurb {
+    color: #aaa; font-size: 11px; margin-top: 4px; line-height: 1.3;
+  }
+  .create-personality { max-width: 420px; margin: 12px auto; }
+
   /* Quick tips shown on the name-entry screen. Compact list so the
      menu stays scannable. */
   .hero-tips {
@@ -515,15 +605,16 @@
   .hero-tips .emoji { font-size: 14px; vertical-align: -1px; }
 
   /* Score Multiplier panel — sits at the top of the attributes sheet
-     (upper-left in flex order) and lists every gain / loss that has
-     been applied. Capped via max-height + scroll so a long run
-     doesn't push the character grid off-screen. */
+     (now positioned below the character grid) and lists every gain /
+     loss that has been applied. Capped via max-height + scroll so a
+     long run doesn't push the page off-screen. */
   .score-multi-panel {
     background: #1f1f24;
     border: 1px solid #393940;
     border-radius: 4px;
     padding: 10px 14px;
     max-width: 340px;
+    margin-top: 16px;
   }
   .score-multi-header {
     display: flex; align-items: baseline; justify-content: space-between;
@@ -737,38 +828,57 @@
 
       <section id="menu-intro">
         <p class="intro-text">
-          Lead three heroes through procedurally-generated dungeons.
-          Battle monsters, loot chests, level up, and see how deep
-          you can go.
+          Begin with a single hero of your choosing. Clear a level and
+          another adventurer joins you — recruit a full party of three
+          across the first three dungeons, then see how deep you can go.
         </p>
         <button id="start-button" class="menu-button" disabled>LOADING…</button>
       </section>
 
-      <section id="hero-names" hidden>
-        <h3>Name your heroes</h3>
+      <section id="hero-create" hidden>
+        <h3>Create your first hero</h3>
+        <p class="intro-text">
+          Pick a class, give them a name, and set how they'll behave in
+          battle. You only have coarse control of your heroes — their
+          personality sliders and target-priority steer everything else.
+          You can retune these any time from the character sheet
+          (<kbd>C</kbd>).
+        </p>
+
+        <!-- Class cards built by menu.js from the shared class registry. -->
+        <div id="class-picker" class="class-picker"></div>
+
         <div class="name-input-row">
-          <span class="role-label">Knight</span>
-          <input type="text" id="name-knight" maxlength="14" value="Knight" />
-        </div>
-        <div class="name-input-row">
-          <span class="role-label">Mage</span>
-          <input type="text" id="name-mage" maxlength="14" value="Mage" />
-        </div>
-        <div class="name-input-row">
-          <span class="role-label">Cleric</span>
-          <input type="text" id="name-cleric" maxlength="14" value="Cleric" />
+          <span class="role-label">Name</span>
+          <input type="text" id="create-name" maxlength="14" value="Knight" />
         </div>
 
-        <div class="hero-tips">
-          <h3>A few quick tips</h3>
-          <ul>
-            <li>Press <kbd>I</kbd> for inventory, <kbd>C</kbd> for your character sheet.</li>
-            <li>Your <strong>Score Multiplier</strong> (×) starts at 1.00 and scales every point you earn.</li>
-            <li>Defeat every monster and collect every chest to advance to the next level.</li>
-            <li>Each level-up after the first lets you pick <span class="emoji">😇</span> <strong>Level UP</strong> (stats + <span class="loss">−0.10×</span>) or <span class="emoji">😈</span> <strong>LEVEL DOWN</strong> (no stats + <span class="gain">+1.00×</span>).</li>
-            <li><strong>Feed the Demon:</strong> drag unwanted loot into the discard slot for <span class="gain">+0.01×</span> per modifier tier.</li>
-            <li>After clearing a level, you can revive a fallen hero for <span class="loss">−0.50×</span>.</li>
-          </ul>
+        <div class="personality-config-col create-personality">
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="create-dist">Distance from enemies</label>
+            <input type="range" id="create-dist" min="0" max="200" value="8" />
+            <span id="create-dist-value">8 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="create-target">Target priority</label>
+            <select id="create-target">
+              <option value="closest">Closest</option>
+              <option value="lowest_hp">Lowest HP</option>
+              <option value="ranged">Ranged attackers</option>
+              <option value="melee">Melee attackers</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label for="create-indep">Independence</label>
+            <input type="range" id="create-indep" min="96" max="400" value="160" />
+            <span id="create-indep-value">160 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="create-greed">Greed</label>
+            <input type="range" id="create-greed" min="0" max="400" value="112" />
+            <span id="create-greed-value">112 px</span>
+          </div>
         </div>
 
         <button id="begin-button" class="menu-button">BEGIN ADVENTURE</button>
@@ -782,21 +892,44 @@
         <span class="hint">press <kbd>C</kbd> to close</span>
       </header>
 
-      <!-- Score Multiplier panel sits in the upper-left and lists
-           every gain / loss applied this run. Populated by
-           character-sheet.js's refreshScoreMulti. -->
-      <section class="score-multi-panel">
-        <div class="score-multi-header">
-          <h3>Score Multiplier</h3>
-          <span class="score-multi-value" id="score-multi-value">1.00×</span>
-        </div>
-        <ul class="score-multi-history" id="score-multi-history"></ul>
-      </section>
-
+      <!-- Per-character columns. Order matches the player's mental
+           model of the game: Personality (the knobs they actually
+           steer with) → Skills (what those knobs select for) → Stats
+           and Resistances (the raw numbers). Score Multiplier moves
+           below the grid so the per-character panel reads top-down. -->
       <div class="character-grid">
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-0">Hero A</h3>
-          <div class="role">Knight</div>
+          <div class="role" id="role-0">Knight</div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-0">Distance from enemies</label>
+            <input type="range" id="pref-dist-0" min="0" max="200" value="32" />
+            <span id="pref-dist-0-value">32 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="target-mode-0">Target priority</label>
+            <select id="target-mode-0">
+              <option value="closest">Closest</option>
+              <option value="lowest_hp">Lowest HP</option>
+              <option value="ranged">Ranged attackers</option>
+              <option value="melee">Melee attackers</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label for="independence-0">Independence</label>
+            <input type="range" id="independence-0" min="96" max="400" value="160" />
+            <span id="independence-0-value">160 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="greed-0">Greed</label>
+            <input type="range" id="greed-0" min="0" max="400" value="112" />
+            <span id="greed-0-value">112 px</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-0"></div>
 
           <h4>Stats</h4>
           <div class="stats-grid">
@@ -808,26 +941,40 @@
 
           <h4>Resistances</h4>
           <div class="resistances-grid" id="resistances-0"></div>
-
-          <h4>Personality</h4>
-          <div class="slider-row">
-            <label for="pref-dist-0">Preferred distance</label>
-            <input type="range" id="pref-dist-0" min="0" max="200" value="32" />
-            <span id="pref-dist-0-value">32 px</span>
-          </div>
-          <div class="slider-row">
-            <label for="flee-hp-0">Flee when HP below</label>
-            <input type="range" id="flee-hp-0" min="0" max="100" value="20" />
-            <span id="flee-hp-0-value">20 %</span>
-          </div>
-
-          <h4>Skills</h4>
-          <div class="skills-detail" id="skills-detail-0"></div>
         </div>
 
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-1">Hero B</h3>
-          <div class="role">Mage</div>
+          <div class="role" id="role-1">Mage</div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-1">Distance from enemies</label>
+            <input type="range" id="pref-dist-1" min="0" max="200" value="120" />
+            <span id="pref-dist-1-value">120 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="target-mode-1">Target priority</label>
+            <select id="target-mode-1">
+              <option value="closest">Closest</option>
+              <option value="lowest_hp">Lowest HP</option>
+              <option value="ranged">Ranged attackers</option>
+              <option value="melee">Melee attackers</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label for="independence-1">Independence</label>
+            <input type="range" id="independence-1" min="96" max="400" value="112" />
+            <span id="independence-1-value">112 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="greed-1">Greed</label>
+            <input type="range" id="greed-1" min="0" max="400" value="96" />
+            <span id="greed-1-value">96 px</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-1"></div>
 
           <h4>Stats</h4>
           <div class="stats-grid">
@@ -839,26 +986,40 @@
 
           <h4>Resistances</h4>
           <div class="resistances-grid" id="resistances-1"></div>
-
-          <h4>Personality</h4>
-          <div class="slider-row">
-            <label for="pref-dist-1">Preferred distance</label>
-            <input type="range" id="pref-dist-1" min="0" max="200" value="120" />
-            <span id="pref-dist-1-value">120 px</span>
-          </div>
-          <div class="slider-row">
-            <label for="flee-hp-1">Flee when HP below</label>
-            <input type="range" id="flee-hp-1" min="0" max="100" value="30" />
-            <span id="flee-hp-1-value">30 %</span>
-          </div>
-
-          <h4>Skills</h4>
-          <div class="skills-detail" id="skills-detail-1"></div>
         </div>
 
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-2">Hero C</h3>
-          <div class="role">Cleric</div>
+          <div class="role" id="role-2">Cleric</div>
+
+          <h4>Personality</h4>
+          <div class="slider-row">
+            <label for="pref-dist-2">Distance from enemies</label>
+            <input type="range" id="pref-dist-2" min="0" max="200" value="80" />
+            <span id="pref-dist-2-value">80 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="target-mode-2">Target priority</label>
+            <select id="target-mode-2">
+              <option value="closest">Closest</option>
+              <option value="lowest_hp">Lowest HP</option>
+              <option value="ranged">Ranged attackers</option>
+              <option value="melee">Melee attackers</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label for="independence-2">Independence</label>
+            <input type="range" id="independence-2" min="96" max="400" value="96" />
+            <span id="independence-2-value">96 px</span>
+          </div>
+          <div class="slider-row">
+            <label for="greed-2">Greed</label>
+            <input type="range" id="greed-2" min="0" max="400" value="80" />
+            <span id="greed-2-value">80 px</span>
+          </div>
+
+          <h4>Skills</h4>
+          <div class="skills-detail" id="skills-detail-2"></div>
 
           <h4>Stats</h4>
           <div class="stats-grid">
@@ -870,23 +1031,20 @@
 
           <h4>Resistances</h4>
           <div class="resistances-grid" id="resistances-2"></div>
-
-          <h4>Personality</h4>
-          <div class="slider-row">
-            <label for="pref-dist-2">Preferred distance</label>
-            <input type="range" id="pref-dist-2" min="0" max="200" value="80" />
-            <span id="pref-dist-2-value">80 px</span>
-          </div>
-          <div class="slider-row">
-            <label for="flee-hp-2">Flee when HP below</label>
-            <input type="range" id="flee-hp-2" min="0" max="100" value="30" />
-            <span id="flee-hp-2-value">30 %</span>
-          </div>
-
-          <h4>Skills</h4>
-          <div class="skills-detail" id="skills-detail-2"></div>
         </div>
       </div>
+
+      <!-- Score Multiplier panel — every gain / loss applied this run.
+           Populated by character-sheet.js's refreshScoreMulti. Lives
+           below the character grid so the per-character columns lead
+           the sheet and the run-wide breakdown closes it out. -->
+      <section class="score-multi-panel">
+        <div class="score-multi-header">
+          <h3>Score Multiplier</h3>
+          <span class="score-multi-value" id="score-multi-value">1.00×</span>
+        </div>
+        <ul class="score-multi-history" id="score-multi-history"></ul>
+      </section>
     </div>
 
     <!-- Inventory sheet (I key): Personality, Skills, Equipment, shared bag. -->
@@ -899,7 +1057,7 @@
       <div class="character-grid">
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-inv-0">Hero A</h3>
-          <div class="role">Knight</div>
+          <div class="role" id="role-inv-0">Knight</div>
 
           <h4>Equipment <span class="stats-summary" id="stats-summary-0">no bonuses</span></h4>
           <div class="equipment-grid">
@@ -924,7 +1082,7 @@
 
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-inv-1">Hero B</h3>
-          <div class="role">Mage</div>
+          <div class="role" id="role-inv-1">Mage</div>
 
           <h4>Equipment <span class="stats-summary" id="stats-summary-1">no bonuses</span></h4>
           <div class="equipment-grid">
@@ -949,7 +1107,7 @@
 
         <div class="character-col">
           <h3 class="hero-name" id="hero-name-inv-2">Hero C</h3>
-          <div class="role">Cleric</div>
+          <div class="role" id="role-inv-2">Cleric</div>
 
           <h4>Equipment <span class="stats-summary" id="stats-summary-2">no bonuses</span></h4>
           <div class="equipment-grid">
@@ -1016,6 +1174,20 @@
       <button id="revive-continue" class="revive-continue">Continue without reviving</button>
     </div>
 
+    <!-- Recruit modal. Shown on reaching map 2 and map 3 so the player
+         can add a hero from a class not yet in the party. Scene builds
+         the class cards dynamically. -->
+    <div id="recruit-modal" class="game-popup">
+      <h2>A NEW HERO JOINS</h2>
+      <p class="popup-sub">Choose a class to add to your party, then name them.</p>
+      <div id="recruit-classes" class="recruit-classes"></div>
+      <div class="name-input-row">
+        <span class="role-label">Name</span>
+        <input type="text" id="recruit-name" maxlength="14" />
+      </div>
+      <button id="recruit-confirm" class="menu-button">Add to party</button>
+    </div>
+
   </div>
   <div id="status">Loading game...</div>
   <div id="error"></div>
@@ -1031,7 +1203,7 @@
       const v = Date.now();
       const names = [
         'main', 'scene', 'config', 'assets', 'map', 'monsters',
-        'map-generator', 'menu',
+        'map-generator', 'menu', 'classes',
         'personality', 'skills', 'tags', 'inventory', 'items',
         'item-generator', 'character-sheet', 'path',
         'hud', 'tile-browser', 'personas', 'sounds',

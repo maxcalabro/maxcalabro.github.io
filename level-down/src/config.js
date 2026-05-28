@@ -50,6 +50,25 @@ export const POST_INTENT_REST = 500;    // brief pause before wandering resumes 
 // adjacent to each other when needed.
 export const BUDDY_DISTANCE = 64;
 
+// Independence (the regroup "leash" radius) must stay comfortably
+// ABOVE BUDDY_DISTANCE. The leash is a cohesion pull toward the group
+// centre; the buddy push is a separation force. If their ranges
+// overlap, a character is simultaneously told "come closer" and "back
+// off", and the tug-of-war makes the party jitter and slowly drift
+// across the map. Keeping the leash a full tile beyond the buddy range
+// leaves a neutral band between the two so neither force fights the
+// other. The slider UI clamps to this minimum and the scene clamps
+// again as a safety net.
+export const INDEPENDENCE_MIN = BUDDY_DISTANCE + TILE;   // 96 px
+
+// Hysteresis on the regroup trigger. A character starts heading back
+// once they stray past their leash, and keeps heading back until
+// they're within (leash − REGROUP_HYSTERESIS). The gap stops the
+// regroup goal from flickering on and off right at the boundary —
+// without it, crossing the leash every other frame produced the
+// visible jitter.
+export const REGROUP_HYSTERESIS = TILE;                  // 32 px
+
 // Per-character tints (rainbow palette). On creation each party
 // member draws one of these without replacement, then uses it for
 // their HP bar, hover-name label, and speech-bubble text. Mirrors the

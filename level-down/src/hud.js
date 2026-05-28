@@ -30,6 +30,11 @@ import { cumulativeKillsForLevel } from './scene.js';
 // HP bars (those are world-space and live at DEPTH.overlay, not on
 // the screen-space HUD layer).
 export function buildHud(scene) {
+  // Idempotent: tear down anything a previous build created so this can
+  // be re-run when the party grows (a hero recruited on map 2 / 3 adds
+  // an HP row and a skill row, which shifts the whole layout).
+  teardownHud(scene);
+
   const hudStyle = {
     font: '14px monospace', fill: '#fff',
     backgroundColor: '#000a', padding: { x: 6, y: 3 },
@@ -80,6 +85,29 @@ export function buildHud(scene) {
   });
 }
 
+// Destroys every HUD object a prior buildHud created so the build can
+// run again cleanly on party growth. Safe to call before the first
+// build (all fields are simply absent).
+function teardownHud(scene) {
+  for (const c of scene.party) {
+    if (c.hpText) { c.hpText.destroy(); c.hpText = null; }
+    if (c._hudCharLabel) { c._hudCharLabel.destroy(); c._hudCharLabel = null; }
+    if (c.skillIcons) {
+      for (const key in c.skillIcons) {
+        const icon = c.skillIcons[key];
+        if (icon.bg) icon.bg.destroy();
+        if (icon.fill) icon.fill.destroy();
+        if (icon.label) icon.label.destroy();
+      }
+      c.skillIcons = {};
+    }
+  }
+  for (const field of ['inventoryText', 'scoreText', 'floatingHpBars',
+                       'hoveredEnemyName', 'hoveredCharacterName']) {
+    if (scene[field]) { scene[field].destroy(); scene[field] = null; }
+  }
+}
+
 function skillRowBaseY(scene, charIdx) {
   const h = 18, rowGap = 4;
   const totalRows = scene.party.length;
@@ -128,13 +156,9 @@ export function updateHud(scene) {
     c.hpText.setText(c.active ? hpStr : `${who}: DEAD`);
     if (!c.active) {
       c.hpText.setColor('#666666');
-    } else if (scene.isFleeing(c)) {
-      // Override with red so the danger state is unmistakable even
-      // for a character whose normal tint is also warm-toned.
-      c.hpText.setColor('#ff8888');
     } else {
-      // Normal state — tinted with the character's rainbow colour
-      // so each hero's HP line is identifiable at a glance.
+      // Tinted with the character's rainbow colour so each hero's HP
+      // line is identifiable at a glance.
       const colorHex = '#' + (c.color || 0xffffff).toString(16).padStart(6, '0');
       c.hpText.setColor(colorHex);
     }
@@ -170,12 +194,21 @@ export function updateHud(scene) {
     for (const key of c.skillKeys) {
       const skill = SKILLS[key];
       const state = c.skills[key];
-      // Bar fills relative to the *actual* cooldown that was set on
-      // the last fire — which is reduced by attack_speed gear. Falls
-      // back to the skill's base cooldown for the first frame before
-      // a skill has fired.
-      const denom = state.maxCooldown || skill.cooldownMs;
-      const ready = 1 - (state.cooldown / denom);
+      if (!skill || !state || !c.skillIcons[key]) continue;
+      // Auras are passive — no cooldown — so their bar always reads
+      // full to signal "active". (Guarding here also avoids a NaN
+      // width from the 0/undefined cooldown math below.)
+      let ready;
+      if (skill.aura) {
+        ready = 1;
+      } else {
+        // Bar fills relative to the *actual* cooldown that was set on
+        // the last fire — which is reduced by attack_speed gear. Falls
+        // back to the skill's base cooldown for the first frame before
+        // a skill has fired.
+        const denom = state.maxCooldown || skill.cooldownMs;
+        ready = denom ? 1 - (state.cooldown / denom) : 1;
+      }
       c.skillIcons[key].fill.width = c.skillIcons[key].fullW * ready;
     }
   }
@@ -273,16 +306,34 @@ export function drawPersonalityRings(scene) {
   const sheetOpen = isAnySheetOpen();
   for (const c of scene.party) {
     if (!c.active) continue;
-    const fleeing = scene.isFleeing(c);
-    const color = fleeing ? 0xff5555 : 0x4cc9f0;
-    const alpha = fleeing ? 0.45 : 0.22;
     if (c.personality.preferredDistance > 0) {
-      scene.personalityRing.lineStyle(1, color, alpha);
+      scene.personalityRing.lineStyle(1, 0x4cc9f0, 0.22);
       scene.personalityRing.strokeCircle(c.x, c.y, c.personality.preferredDistance);
     }
     if (sheetOpen) {
       scene.personalityRing.lineStyle(1, 0xff8800, 0.18);
       scene.personalityRing.strokeCircle(c.x, c.y, SIGHT_RANGE);
+    }
+  }
+}
+
+// Lightly-shaded ground region for every active aura emitter — the
+// persistent area an aura (e.g. Haste Aura from a Crown) covers. A
+// faint fill plus a slightly stronger edge so the radius reads clearly
+// without obscuring what's underneath. Drawn beneath the sprites.
+export function drawAuraRegions(scene) {
+  if (!scene.auraRegion) return;
+  scene.auraRegion.clear();
+  for (const c of scene.party) {
+    if (!c.active) continue;
+    for (const key of c.skillKeys || []) {
+      const skill = SKILLS[key];
+      if (!skill || !skill.aura) continue;
+      const color = skill.color || 0xffd23f;
+      scene.auraRegion.fillStyle(color, 0.10);
+      scene.auraRegion.fillCircle(c.x, c.y, skill.range);
+      scene.auraRegion.lineStyle(1, color, 0.28);
+      scene.auraRegion.strokeCircle(c.x, c.y, skill.range);
     }
   }
 }

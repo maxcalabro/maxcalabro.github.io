@@ -48,7 +48,19 @@ const DEFAULTS = {
   obstacleDensity: 0.10,
   decorDensity: 0.08,
   obstacleWeights: { T: 7, B: 3 },
-  monsterWeights: { s: 1, g: 1, z: 1, r: 1 },
+  // Monster spawn weights. Wizard is intentionally rare (~3-4% of
+  // spawns) so a single one is a memorable threat rather than a
+  // routine encounter.
+  monsterWeights: {
+    s: 1,    // skeleton
+    g: 1,    // goblin (ranged)
+    z: 1,    // zombie
+    r: 1,    // rat
+    b: 1,    // bat
+    p: 1,    // spider (ranged)
+    k: 1,    // crab
+    w: 0.3,  // evil wizard — rare
+  },
   // ',' grass-alt, '*' flowers, 'o' rock patch
   decorWeights: { ',': 14, '*': 5, o: 4 },
   // Waypoints beyond the spawn — each extra one adds a path leg.

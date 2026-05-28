@@ -21,10 +21,11 @@ import {
   PACE_MIN, PACE_MAX, PACE_STEP, PACE_DECAY,
   WANDER_MIN_DIST, WANDER_MAX_DIST, WANDER_MIN_REST, WANDER_MAX_REST,
   WANDER_GIVEUP_MS, WANDER_SPEED_FACTOR, POST_INTENT_REST,
-  BUDDY_DISTANCE, PARTY_COLORS,
+  BUDDY_DISTANCE, INDEPENDENCE_MIN, REGROUP_HYSTERESIS, PARTY_COLORS,
 } from './config.js';
 import { TILES, PACK, assetPath } from './assets.js';
 import { makePersonality } from './personality.js';
+import { CLASS_ORDER, CLASS_PERSONALITY, CLASS_INFO } from './classes.js';
 import { SKILLS } from './skills.js';
 import {
   makeEquipment, makeSharedInventory, addToInventory, equipmentBonus,
@@ -40,7 +41,7 @@ import {
 } from './tags.js';
 import {
   initCharacterSheets, toggleAttributesSheet, toggleInventorySheet,
-  isAnySheetOpen, refreshEquipment, refreshScoreMulti,
+  isAnySheetOpen, refreshEquipment, refreshScoreMulti, notifyPartyChanged,
 } from './character-sheet.js';
 import {
   worldToTile, tileToWorld, buildPassableGrid, isPassable,
@@ -49,7 +50,7 @@ import {
 import { toggleTileBrowser } from './tile-browser.js';
 import {
   buildHud, updateHud, rebuildSkillIcons,
-  updateFloatingHpBars, drawPersonalityRings,
+  updateFloatingHpBars, drawPersonalityRings, drawAuraRegions,
   showItemPopup, showDamageNumber, showBuffPopup,
   showLevelCompleteMessage, showLevelUpMessage,
   showKillMessage, showLootMessage, showCharacterComment,
@@ -75,7 +76,7 @@ const MAGE_RESISTANCES = {
   [TAGS.PHYSICAL]: -0.10,  // frail
   [TAGS.FIRE]:     0.10,   // elemental affinity from spellcraft
   [TAGS.COLD]:     0.10,
-  [TAGS.LIGHTNING]: 0.05,
+  [TAGS.LIGHTNING]: 0.10,
 };
 const CLERIC_RESISTANCES = {
   [TAGS.FIRE]:     0.05,
@@ -83,69 +84,77 @@ const CLERIC_RESISTANCES = {
   [TAGS.POISON]:   0.10,
   [TAGS.BLEEDING]: 0.05,
 };
+const ARCHER_RESISTANCES = {
+  [TAGS.PHYSICAL]: 0.10,   // nimble — harder to land a clean hit
+  [TAGS.POISON]:   0.10,   // woodsman's tolerance
+};
 
 // `statsPerLevel` is *both* the level-1 starting block and the
 // per-level increment applied by levelUpParty. So a Knight at party
 // level 3 has stats (3*3, 2*3, 1*3, 2*3) = (9, 6, 3, 6). This keeps
 // class identity intact as the party grows — the Mage's Int lead over
 // the Knight widens at every level.
-const PARTY_TEMPLATES = [
-  {
-    label: 'A',
+// Class templates keyed by role. The party is now built one character
+// at a time (one on map 1, recruiting a second on map 2 and a third on
+// map 3 — each from a class not yet chosen), so we look templates up by
+// role rather than iterating a fixed roster. Personality defaults come
+// from classes.js (CLASS_PERSONALITY) so the menu sliders, the recruit
+// flow, and the live character all agree on a class's feel.
+const CLASS_TEMPLATES = {
+  Knight: {
     role: 'Knight',
     spriteKey: 'player',
-    statsPerLevel: { strength: 3, agility: 2, intelligence: 1, resolve: 2 },
+    statsPerLevel: { strength: 3, agility: 1, intelligence: 1, resolve: 3 },
     resistances: KNIGHT_RESISTANCES,
     startingEquipment: { weapon: 'iron_sword' },
-    personalityOverrides: {
-      preferredDistance: 8,
-      fleeAtHpFraction: 0.2,
-    },
+    personalityOverrides: CLASS_PERSONALITY.Knight,
   },
-  {
-    label: 'B',
+  Mage: {
     role: 'Mage',
     spriteKey: 'player_b',
     statsPerLevel: { strength: 1, agility: 2, intelligence: 3, resolve: 2 },
     resistances: MAGE_RESISTANCES,
     startingEquipment: { weapon: 'firebolt_staff' },
-    personalityOverrides: {
-      preferredDistance: 120,
-      fleeAtHpFraction: 0.3,
-    },
+    personalityOverrides: CLASS_PERSONALITY.Mage,
   },
-  {
-    label: 'C',
+  Cleric: {
     role: 'Cleric',
     spriteKey: 'player_c',
-    statsPerLevel: { strength: 1, agility: 1, intelligence: 3, resolve: 3 },
+    statsPerLevel: { strength: 1, agility: 2, intelligence: 3, resolve: 2 },
     resistances: CLERIC_RESISTANCES,
     startingEquipment: { weapon: 'healing_staff' },
-    personalityOverrides: {
-      // Sits in the middle distance — close enough to heal teammates,
-      // far enough to stay out of melee.
-      preferredDistance: 60,
-      fleeAtHpFraction: 0.3,
-    },
+    personalityOverrides: CLASS_PERSONALITY.Cleric,
   },
-];
+  Archer: {
+    role: 'Archer',
+    spriteKey: 'player_d',
+    // Agility-focused: fast attacks (attack-speed) and fast feet
+    // (move-speed). Per the class spec: Str 2, Agi 3, Int 1, Res 2.
+    statsPerLevel: { strength: 2, agility: 3, intelligence: 1, resolve: 2 },
+    resistances: ARCHER_RESISTANCES,
+    startingEquipment: { weapon: 'short_bow' },
+    personalityOverrides: CLASS_PERSONALITY.Archer,
+  },
+};
 
 // Skill slots. Each character keeps a map { slot: skillId|null }
 // derived from defaults + equipped-item grants. SKILL_SLOTS sets the
 // display order so the HUD and character sheet show skills in a
 // consistent left-to-right sequence.
-const SKILL_SLOTS = ['primary', 'secondary', 'defensive', 'utility', 'accessory'];
+const SKILL_SLOTS = ['primary', 'secondary', 'defensive', 'utility', 'head', 'accessory'];
 
 // Defaults that apply when no equipped item grants a skill in a
 // given slot. Punch and Throw Rock are *unarmed* defaults: as soon as
 // any weapon is equipped, BOTH are removed (see recomputeSkillsFor)
-// — a sword-bearer doesn't also throw rocks. The defensive and
-// utility slots stay open for armor / accessory grants.
+// — a sword-bearer doesn't also throw rocks. The defensive, utility,
+// head, and accessory slots stay open for armor / helmet / accessory
+// grants (the `head` slot holds the helmet's warcry or aura).
 const DEFAULT_SKILL_BY_SLOT = {
   primary:   'punch',
   secondary: 'throw_rock',
   defensive: null,
   utility:   null,
+  head:      null,
   accessory: null,
 };
 
@@ -313,10 +322,25 @@ export function makeGameScene(config) {
       // Map level (dungeon depth). Adventure mode increments on every
       // cleared level. Read by monsters.statsFor for HP/damage scaling.
       this.mapLevel = init.level || 1;
-      // Player-chosen hero names from the start menu, keyed by class
-      // role. Empty object is a valid fallback (createCharacter falls
-      // back to the template's role string in that case).
-      this.heroNames = init.heroNames || {};
+      // Progressive party building. The player now creates ONE hero at
+      // the start menu (init.startClass / init.heroName /
+      // init.personalityChoice) and recruits a second on map 2 and a
+      // third on map 3, each from a class not yet chosen. heroNames and
+      // personalityChoices are keyed by role and grow as heroes join;
+      // createCharacter reads them by role (falling back to the
+      // template defaults when a key is absent).
+      this.startClass = init.startClass || (CLASS_ORDER[0]);
+      this.heroNames = {};
+      this.personalityChoices = {};
+      if (init.heroName) this.heroNames[this.startClass] = init.heroName;
+      if (init.personalityChoice) this.personalityChoices[this.startClass] = init.personalityChoice;
+      // Roles already in the party, in join order. Drives which classes
+      // the recruit modal offers (CLASS_ORDER minus these).
+      this.chosenClasses = [];
+      // Shuffled colour / persona pools, drawn from as heroes join so
+      // each member stays visually + tonally distinct across recruits.
+      this.colorPool = shuffleArray(PARTY_COLORS.slice());
+      this.personaPool = shuffledPersonas();
       // Party progression. Two separate "levels":
       //   - trueLevel: how many XP thresholds the party has crossed.
       //     Monotonically increasing. Drives the cumulativeKillsForLevel
@@ -350,6 +374,8 @@ export function makeGameScene(config) {
       // are frozen and key shortcuts are suppressed.
       this.levelChoiceOpen = false;
       this.reviveModalOpen = false;
+      // Set while the "recruit a new hero" modal is open (maps 2 & 3).
+      this.recruitModalOpen = false;
 
       // World refs (set in create)
       this.party = [];
@@ -373,6 +399,7 @@ export function makeGameScene(config) {
       this.inventoryText = null;
       this.scoreText = null;
       this.personalityRing = null;
+      this.auraRegion = null;
       // Floating HP bars (party always; hovered enemy on hover) and
       // the hover-name labels. Created in buildHud.
       this.floatingHpBars = null;
@@ -406,6 +433,10 @@ export function makeGameScene(config) {
       this.setupInput();
       buildHud(this);
       this.personalityRing = this.add.graphics().setDepth(DEPTH.ring);
+      // Aura fields draw as a lightly-shaded ground region beneath the
+      // sprites (DEPTH.decor sits above the floor but below characters,
+      // so walls occlude it like a real floor effect).
+      this.auraRegion = this.add.graphics().setDepth(DEPTH.decor);
 
       // Camera follows an invisible zone we'll position at the party
       // midpoint every frame — keeps both characters in view as they
@@ -436,6 +467,8 @@ export function makeGameScene(config) {
       if (downBtn) downBtn.addEventListener('click', () => this.resolveLevelChoice('down'));
       const continueBtn = document.getElementById('revive-continue');
       if (continueBtn) continueBtn.addEventListener('click', () => this.closeReviveModal());
+      const recruitBtn = document.getElementById('recruit-confirm');
+      if (recruitBtn) recruitBtn.addEventListener('click', () => this.confirmRecruit());
     }
 
     update(time, delta) {
@@ -443,7 +476,7 @@ export function makeGameScene(config) {
       // gameplay tick AND every key shortcut so the player can't
       // sneak inputs through. Re-zeroes velocities each frame so
       // anyone with leftover speed stops immediately.
-      if (this.levelChoiceOpen || this.reviveModalOpen) {
+      if (this.levelChoiceOpen || this.reviveModalOpen || this.recruitModalOpen) {
         for (const c of this.party) if (c.active) c.setVelocity(0);
         if (this.enemies) this.enemies.children.iterate((e) => {
           if (e && e.body) e.setVelocity(0);
@@ -468,27 +501,33 @@ export function makeGameScene(config) {
       if (this.isModalOpen()) {
         for (const c of this.party) if (c.active) c.setVelocity(0);
         drawPersonalityRings(this);
+        drawAuraRegions(this);
         return;
       }
 
+      // Recompute aura coverage before movement/skills so this frame's
+      // attack-speed and movement-speed reads see the right bonuses.
+      this.recomputeAuras();
       for (const c of this.party) {
         if (!c.active) continue;
         this.updateCharacterMovement(c, time);
         this.updateCharacterSkills(c, time, delta);
       }
       this.tickPartySpeech(time);
-      this.updateEnemies();
+      this.updateEnemies(time, delta);
       this.updateCameraTarget();
       updateHud(this);
       updateFloatingHpBars(this);
       drawPersonalityRings(this);
+      drawAuraRegions(this);
     }
 
     isModalOpen() {
       return this.tileBrowserOn
         || isAnySheetOpen()
         || this.levelChoiceOpen
-        || this.reviveModalOpen;
+        || this.reviveModalOpen
+        || this.recruitModalOpen;
     }
 
     aliveParty() {
@@ -513,22 +552,13 @@ export function makeGameScene(config) {
       // the map data directly — see path.js for the wall charset.
       this.passableGrid = buildPassableGrid(this.mapData);
 
-      // Always spawn the full party from PARTY_TEMPLATES. The map's 'P'
-      // marker sets the leader's spawn; subsequent members are placed
-      // one tile to the right (and step further out if more land later).
-      const baseX = (spawn.x !== null ? spawn.x : 2) * TILE + TILE / 2;
-      const baseY = (spawn.y !== null ? spawn.y : 2) * TILE + TILE / 2;
-      // Deal rainbow colours + personas without replacement so each
-      // hero feels visually + tonally distinct. PARTY_COLORS has more
-      // entries than the party so we shuffle and pick the first N.
-      const colorPool = shuffleArray(PARTY_COLORS.slice()).slice(0, PARTY_TEMPLATES.length);
-      const personaPool = shuffledPersonas().slice(0, PARTY_TEMPLATES.length);
-      this.party = PARTY_TEMPLATES.map((tpl, i) =>
-        this.createCharacter(
-          baseX + i * TILE, baseY, tpl,
-          colorPool[i], personaPool[i],
-        ),
-      );
+      // Spawn ONLY the starting hero. The 2nd and 3rd join later via
+      // the recruit modal (maps 2 & 3). The map's 'P' marker sets the
+      // spawn; recruits are placed one tile to the right of it.
+      this.spawnX = (spawn.x !== null ? spawn.x : 2) * TILE + TILE / 2;
+      this.spawnY = (spawn.y !== null ? spawn.y : 2) * TILE + TILE / 2;
+      this.party = [];
+      this.addCharacterOfClass(this.startClass, this.spawnX, this.spawnY);
 
       // Circular bodies for everything that needs to round corners.
       this.enemies.children.iterate((e) => { if (e) this.setCircleBody(e); });
@@ -643,8 +673,8 @@ export function makeGameScene(config) {
         case '~': this.placePhys(this.walls, 'dun_wall_top', x, y, DEPTH.walls); break;
         case 't': this.placeImage('dun_torch', x, y, DEPTH.decor); break;
         case 'c': this.placeChest(x, y); break;
-        // 'P' is handled in buildMap — the party always spawns from
-        // PARTY_TEMPLATES with the P cell determining where.
+        // 'P' is handled in buildMap — the starting hero spawns at the
+        // P cell (later recruits join beside the party leader).
         // Dirt / flowers / mushrooms / rocks are pure ground; the
         // groundKey lookup above already drew them.
       }
@@ -696,12 +726,24 @@ export function makeGameScene(config) {
       sprite.body.setCircle(r, offset, offset);
     }
 
+    // Early-game difficulty easing tied to how many heroes the player
+    // has. The party is built one hero per dungeon — solo on map 1, two
+    // on map 2, the full three on map 3+ — so the dungeon depth doubles
+    // as the party size for difficulty purposes (and sidesteps the fact
+    // that monsters spawn before that level's recruit happens). Monsters
+    // sit at half strength for a lone hero and ramp linearly back to
+    // full (×1.0) once all three have joined.
+    monsterDifficultyScale() {
+      const partySize = Math.min(3, Math.max(1, this.mapLevel));
+      return 0.5 + 0.25 * (partySize - 1);   // 1→0.50, 2→0.75, 3+→1.00
+    }
+
     placeMonster(typeKey, tx, ty) {
       // Resolve stats through monsters.statsFor so the level-scaling
       // hook is on the spawn path. Per-monster speed/aggroRange,
       // resistances, and attack tags live on the sprite so the damage
       // pipeline can read them uniformly with party members.
-      const stats = statsFor(typeKey, this.mapLevel);
+      const stats = statsFor(typeKey, this.mapLevel, this.monsterDifficultyScale());
       const e = this.placePhys(this.enemies, stats.spriteKey, tx, ty, DEPTH.enemy);
       e.type = typeKey;
       e.displayName = stats.displayName || typeKey;
@@ -715,6 +757,11 @@ export function makeGameScene(config) {
       e.attackSkillTags = stats.attackSkillTags;
       e.points = stats.points || 1;
       e.dying = false;
+      // Skill the monster uses to attack — same SKILLS catalog as
+      // the player. Cooldown ticks down in updateEnemies; the
+      // skill's range / minRange decides when it fires.
+      e.skill = stats.skill || null;
+      e.skillCooldown = 0;
       // Pathfinding state — enemies recompute toward the nearest
       // party member periodically, same data shape as party members.
       e.path = null;
@@ -729,19 +776,19 @@ export function makeGameScene(config) {
       return e;
     }
 
-    createCharacter(x, y, template, color, persona) {
+    createCharacter(x, y, template, color, persona, label) {
       const c = this.physics.add.sprite(x, y, template.spriteKey);
       c.setScale(SCALE);
       c.setDepth(DEPTH.player);
       c.setCollideWorldBounds(true);
       this.setCircleBody(c);
 
-      // Identity. `heroName` is the player-chosen display name from
-      // the start menu (keyed by class role); falls back to the role
-      // string if no name was supplied. `role` is the class
-      // ("Knight" / "Mage" / "Cleric"). `label` is the legacy slot
-      // letter (A/B/C) still used by the HUD's skill-row label.
-      c.label = template.label;
+      // Identity. `heroName` is the player-chosen display name (keyed
+      // by class role); falls back to the role string if no name was
+      // supplied. `role` is the class ("Knight" / "Mage" / "Cleric" /
+      // "Archer"). `label` is the slot letter (A/B/C), assigned by join
+      // order in addCharacterOfClass — used by the HUD's skill-row label.
+      c.label = label || template.label || '?';
       c.role = template.role;
       c.heroName = (this.heroNames && this.heroNames[template.role]) || template.role;
       // Rainbow tint + hidden persona key, both dealt by buildMap.
@@ -767,8 +814,14 @@ export function makeGameScene(config) {
       c.on('pointerout', () => { if (this.hoveredCharacter === c) this.hoveredCharacter = null; });
 
       // Personality + equipment. The shared item bag lives on the
-      // scene; equipment is per-character worn gear.
-      c.personality = makePersonality(template.personalityOverrides);
+      // scene; equipment is per-character worn gear. Pre-game menu
+      // choices for this role override the template defaults so the
+      // sliders the player just set come through to the live character.
+      const choice = this.personalityChoices && this.personalityChoices[template.role];
+      c.personality = makePersonality({
+        ...(template.personalityOverrides || {}),
+        ...(choice || {}),
+      });
       c.equipment = makeEquipment();
 
       // Movement / behaviour state
@@ -777,6 +830,9 @@ export function makeGameScene(config) {
       c.drift = 0;
       c.paceFactor = 1.0;
       c.wander = { target: null, restUntil: 0 };
+      // Regroup hysteresis flag — true while the character is actively
+      // heading back to the group centre (see determineCharacterGoal).
+      c.regrouping = false;
       c.moveTarget = null;
       // Pathfinding state. Populated by recomputePathFor; consumed by
       // followPath. `tiles` is the waypoint list (tile coords), `index`
@@ -796,14 +852,18 @@ export function makeGameScene(config) {
         c.stats[stat] = c.statsPerLevel[stat] * eff;
       }
 
-      // Per-tag resistance map. Class baselines from PARTY_TEMPLATES;
+      // Per-tag resistance map. Class baselines from CLASS_TEMPLATES;
       // items stack on top via equipmentBonus(equipment, <tag>).
       c.resistances = makeEmptyResistances();
       if (template.resistances) Object.assign(c.resistances, template.resistances);
 
-      // Active timed buffs (e.g. Guard). Each entry is
-      // { stats: {…}, expiresAt }. scene.buffBonus reads from here.
+      // Active timed buffs (e.g. Guard, Warcry). Each entry is
+      // { stats: {…}, mult: {…}, expiresAt }. scene.buffBonus /
+      // buffMultiplier read from here.
       c.buffs = [];
+      // Auras currently covering this character — recomputed every
+      // frame by recomputeAuras. { skillKey: auraBonusMap }.
+      c.auras = {};
 
       // Apply starting equipment from the template. Each entry maps
       // a slot key (weapon/armor/…) to an ITEMS key.
@@ -825,6 +885,56 @@ export function makeGameScene(config) {
       c.hp = c.maxHp;
 
       return c;
+    }
+
+    // Creates a character of `role`, drawing a colour + persona from
+    // the shuffled pools and assigning the next slot letter (A/B/C by
+    // join order). Pushes onto this.party and records the class as
+    // chosen. Does NOT register colliders or rebuild the HUD — the
+    // initial build does that in bulk (setupCollisions/buildHud); the
+    // recruit path layers those on via recruitCharacter.
+    addCharacterOfClass(role, x, y) {
+      const template = CLASS_TEMPLATES[role];
+      if (!template) throw new Error('Unknown class: ' + role);
+      const color = this.colorPool.length ? this.colorPool.shift() : 0xffffff;
+      const persona = this.personaPool.length ? this.personaPool.shift() : null;
+      const label = String.fromCharCode(65 + this.party.length); // A, B, C
+      const c = this.createCharacter(x, y, template, color, persona, label);
+      this.party.push(c);
+      this.chosenClasses.push(role);
+      return c;
+    }
+
+    // Brings a newly-chosen hero into an in-progress run (maps 2 & 3).
+    // Spawns them beside the party leader, wires their physics
+    // colliders, and rebuilds the HUD + character sheet so the new
+    // member gets HP/skill rows and a sheet column.
+    recruitCharacter(role, name) {
+      if (name) this.heroNames[role] = name;
+      const leader = this.party[0];
+      const x = (leader ? leader.x : this.spawnX) + TILE;
+      const y = (leader ? leader.y : this.spawnY);
+      const c = this.addCharacterOfClass(role, x, y);
+      this.registerCharacterCollisions(c);
+      // HUD grows by a row; rebuild it wholesale (idempotent).
+      buildHud(this);
+      // Sheet wires the new column, updates role labels + visibility.
+      notifyPartyChanged();
+      refreshEquipment();
+      return c;
+    }
+
+    // Registers the per-character colliders for a single member —
+    // mirrors the per-character block in setupCollisions, used when a
+    // hero joins mid-run. The party-pair colliders link the newcomer
+    // to everyone already in the party (it's already pushed in).
+    registerCharacterCollisions(c) {
+      this.physics.add.collider(c, this.walls);
+      this.physics.add.overlap(c, this.chests, (ch, chest) => this.onCollectChest(ch, chest));
+      this.physics.add.collider(c, this.enemies);
+      for (const other of this.party) {
+        if (other !== c) this.physics.add.collider(c, other);
+      }
     }
 
     // Rebuilds character.skillKeys from defaults + the skills granted
@@ -872,13 +982,15 @@ export function makeGameScene(config) {
         // Chests stay as OVERLAP — walking into one collects it, it
         // shouldn't block movement.
         this.physics.add.overlap(character, this.chests, (c, chest) => this.onCollectChest(c, chest));
-        // Enemies are SOLID against the party. The collider's callback
-        // still fires the damage logic every frame of contact, so
-        // standing next to an enemy keeps hurting you (gated by the
-        // invuln window in onPlayerHit). Previously this was an
-        // overlap — meaning enemies could walk right through characters
-        // and stand on top of them.
-        this.physics.add.collider(character, this.enemies, (c, e) => this.onPlayerHit(c, e));
+        // Enemies are SOLID against the party (physical separation
+        // only). Damage is no longer dealt on contact — every
+        // monster carries a skill (see monsters.js `skill`) that
+        // fires on its own cooldown inside updateEnemies. Standing
+        // next to a melee enemy still takes regular hits because
+        // their melee skill has short range and a short cooldown,
+        // but a player can now run past a slow zombie without
+        // taking a hit every single frame.
+        this.physics.add.collider(character, this.enemies);
       }
 
       // Party members shouldn't overlap.
@@ -920,8 +1032,6 @@ export function makeGameScene(config) {
 
       if (this.handleKeyboardOverride(character)) return;
 
-      const fleeing = this.isFleeing(character);
-
       let dirX = 0, dirY = 0;
 
       // Arrival: clear moveTarget when within the arrival threshold.
@@ -940,7 +1050,7 @@ export function makeGameScene(config) {
       // preferred range, else regroup to the rest of the party.
       // determineCharacterGoal handles the priority logic; A* + path
       // smoothing handles wall navigation.
-      const goal = fleeing ? null : this.determineCharacterGoal(character);
+      const goal = this.determineCharacterGoal(character);
       if (goal) {
         if (this.shouldRecomputePath(character, goal.x, goal.y, time)) {
           this.recomputePathFor(character, goal.x, goal.y, time);
@@ -961,45 +1071,35 @@ export function makeGameScene(config) {
         character.path = null;
       }
 
-      // Panic retreat only takes over when no player command is active.
-      // Once the player clicks, the click is the intent and the
-      // character follows it even at low HP — flee re-engages on the
-      // next idle frame after the moveTarget clears.
-      const beingCommanded = !!character.moveTarget;
-
       // Enemy-influenced movement. preferredDistance is the *setpoint*
       // (not just a floor): the character actively closes when too far
       // and backs off when too close, settling at preferredDistance.
       // Strength is signed and continuous around the setpoint, so the
-      // character glides to a stop instead of oscillating.
-      const nearest = this.findNearestEnemy(character);
-      if (nearest) {
-        const ex = nearest.x - character.x;
-        const ey = nearest.y - character.y;
+      // character glides to a stop instead of oscillating. The chosen
+      // enemy honours the personality.targetMode dropdown so a "lowest
+      // HP" character backpedals to keep their preferred range from the
+      // finisher target, not just the nearest body.
+      const focus = this.findPreferredTargetInRange(character, SIGHT_RANGE);
+      if (focus) {
+        const ex = focus.x - character.x;
+        const ey = focus.y - character.y;
         const ed = Math.hypot(ex, ey);
         if (ed > 0.01 && ed < SIGHT_RANGE) {
           const ux = ex / ed, uy = ey / ed;
-          if (fleeing && !beingCommanded) {
-            // Panic: push away from any visible enemy, full strength.
-            const strength = 1 - ed / SIGHT_RANGE;
-            dirX -= ux * strength;
-            dirY -= uy * strength;
+          const desired = character.personality.preferredDistance;
+          const error = ed - desired;
+          let strength;
+          if (error >= 0) {
+            // Too far from desired — pull toward enemy. Strength
+            // fades from 0 at the setpoint to 1 at sight range.
+            strength = Math.min(1, error / Math.max(1, SIGHT_RANGE - desired));
           } else {
-            const desired = character.personality.preferredDistance;
-            const error = ed - desired;
-            let strength;
-            if (error >= 0) {
-              // Too far from desired — pull toward enemy. Strength
-              // fades from 0 at the setpoint to 1 at sight range.
-              strength = Math.min(1, error / Math.max(1, SIGHT_RANGE - desired));
-            } else {
-              // Too close — push away. Strength fades from 0 at the
-              // setpoint to -1 when overlapping.
-              strength = Math.max(-1, error / Math.max(1, desired));
-            }
-            dirX += ux * strength;
-            dirY += uy * strength;
+            // Too close — push away. Strength fades from 0 at the
+            // setpoint to -1 when overlapping.
+            strength = Math.max(-1, error / Math.max(1, desired));
           }
+          dirX += ux * strength;
+          dirY += uy * strength;
         }
       }
 
@@ -1023,7 +1123,7 @@ export function makeGameScene(config) {
       // No intent from click / personality / buddy push → wander.
       let wandering = false;
       const hasIntent = Math.hypot(dirX, dirY) > 0.05;
-      if (hasIntent || fleeing) {
+      if (hasIntent) {
         character.wander.target = null;
         character.wander.restUntil = time + POST_INTENT_REST;
       } else {
@@ -1046,9 +1146,11 @@ export function makeGameScene(config) {
         // movement speed (it doesn't scale damage).
         const gearSpeed = equipmentBonus(character.equipment, 'speed');
         const agilitySpeed = effectiveStat(character, 'agility') * AGILITY_SPEED_PER_POINT;
+        // Haste Aura (and any future movement aura) folds in here.
+        const auraSpeed = this.auraBonus(character, 'speed');
         const speedFactor = character.paceFactor
           * (wandering ? WANDER_SPEED_FACTOR : 1.0)
-          * (1 + gearSpeed + agilitySpeed);
+          * (1 + gearSpeed + agilitySpeed + auraSpeed);
         character.setVelocity(
           (dirX / mag) * PLAYER_SPEED * speedFactor,
           (dirY / mag) * PLAYER_SPEED * speedFactor,
@@ -1218,11 +1320,17 @@ export function makeGameScene(config) {
       // partially filled at fire-time and look broken.
       const atkSpeed = equipmentBonus(character.equipment, 'attack_speed');
       const agilityAttackSpeed = effectiveStat(character, 'agility') * AGILITY_ATTACK_SPEED_PER_POINT;
-      const speedScale = 1 / (1 + atkSpeed + agilityAttackSpeed);
+      // Haste Aura (and any future attack-speed aura) folds in here.
+      const auraAttackSpeed = this.auraBonus(character, 'attack_speed');
+      const speedScale = 1 / (1 + atkSpeed + agilityAttackSpeed + auraAttackSpeed);
 
       for (const key of character.skillKeys) {
         const skill = SKILLS[key];
         if (!skill) continue;
+        // Auras are passive — granted every frame by recomputeAuras,
+        // never cast. Skip them here so the loop doesn't try to fire a
+        // skill that has no cast().
+        if (skill.aura) continue;
         const state = character.skills[key];
         state.cooldown = Math.max(0, state.cooldown - delta);
         if (state.cooldown > 0) continue;
@@ -1232,8 +1340,11 @@ export function makeGameScene(config) {
         let fired = false;
         if (skill.targetType === 'self') {
           // Use the skill's range as a threat-detection radius so the
-          // character doesn't burn cooldowns in safety.
-          const threat = this.findNearestEnemyInRange(character, skill.range);
+          // character doesn't burn cooldowns in safety. Self-buff trigger
+          // honours personality.targetMode so a "lowest HP" character
+          // pops their guard for the finisher target they're tracking,
+          // not just whoever wandered closest.
+          const threat = this.findPreferredTargetInRange(character, skill.range);
           if (threat) {
             skill.cast(this, character);
             state.cooldown = effCooldown;
@@ -1257,7 +1368,7 @@ export function makeGameScene(config) {
           // floor — ice_knife, fireball, etc. each set one so they
           // pass on point-blank targets and let the melee skill in
           // the same loadout take that swing instead.
-          const target = this.findNearestEnemyInRange(
+          const target = this.findPreferredTargetInRange(
             character, skill.range, skill.minRange || 0,
           );
           if (target) {
@@ -1311,16 +1422,38 @@ export function makeGameScene(config) {
       return bestT === null ? null : { t: bestT, wall: bestWall };
     }
 
+    // Dispatcher used by every skill helper in skills.js — figures
+    // out whether the target is a party member or an enemy and
+    // routes to the appropriate damage handler. Player skills cast
+    // at enemies go through damageEnemy; enemy skills cast at the
+    // party go through damageCharacter. The skill helpers don't
+    // care about target type, so the same cast() works for both
+    // sides.
+    applyDamage(caster, target, skill) {
+      if (!target) return;
+      if (this.party && this.party.indexOf(target) >= 0) {
+        this.damageCharacter(caster, target, skill);
+      } else {
+        this.damageEnemy(caster, target, skill);
+      }
+    }
+
     damageEnemy(caster, enemy, skill) {
       if (!enemy || !enemy.active || enemy.dying) return;
       // Base damage = skill's nominal damage plus any flat weapon bonus.
       // applyDamageFormula then layers stat scaling and target
-      // resistance on top.
+      // resistance on top, plus per-type bonuses from gear and from
+      // the skill's own extraDamage map.
       const weapon = caster ? equipmentBonus(caster.equipment, 'damage') : 0;
       const base = (skill.damage || 0) + weapon;
-      const dealt = applyDamageFormula(
-        base, skill.damageType, skill.tags, caster, enemy,
+      let dealt = applyDamageFormula(
+        base, skill.damageType, skill.tags, caster, enemy, skill.extraDamage,
       );
+      // Multiplicative damage buffs (e.g. Strengthening Warcry's ×2)
+      // apply to the final number so the whole hit — base, stat
+      // scaling, and per-type bonuses alike — is amplified uniformly.
+      const dmgMult = this.buffMultiplier(caster, 'damage');
+      if (dmgMult !== 1) dealt = Math.max(1, Math.round(dealt * dmgMult));
       enemy.hp -= dealt;
       showDamageNumber(this, enemy, dealt, skill.color || 0xffffff);
       // Star-burst impact spark on every hit — applies uniformly to
@@ -1368,6 +1501,67 @@ export function makeGameScene(config) {
       }
     }
 
+    // Mirror of damageEnemy for the enemy→party direction. Used when
+    // a monster's skill hits a party member. The damage base comes
+    // from the monster's archetype `dmg` (so map-level scaling
+    // carries through) rather than the skill's nominal `damage`,
+    // which is just a fallback for skills cast by a player or other
+    // dmg-less source. Defense (gear + buff) reduces base before
+    // the damage formula runs, then the resistance pipeline tops
+    // off with the target's class/gear resistances.
+    damageCharacter(caster, character, skill) {
+      if (!character || !character.active || character.invuln) return;
+      const defense = equipmentBonus(character.equipment, 'defense')
+        + this.buffBonus(character, 'defense');
+      const sourceBase = (caster && caster.dmg !== undefined)
+        ? caster.dmg
+        : (skill.damage || 0);
+      const base = Math.max(0, sourceBase - defense);
+      const dealt = applyDamageFormula(
+        base, skill.damageType, skill.tags, caster, character, skill.extraDamage,
+      );
+      character.hp -= dealt;
+      character.invuln = true;
+      character.setTint(0xff6666);
+
+      // Floating numbers + impact spark, same visual language as
+      // damageEnemy so the player sees damage feedback consistently
+      // whether they're dealing or taking it.
+      showDamageNumber(this, character, dealt, skill.color || 0xff8888);
+      showHitSpark(this, character.x, character.y, skill.color || 0xff8888, dealt);
+
+      // Knockback away from the caster — gives the hit some weight
+      // and breaks the player out of the contact patch so they
+      // aren't immediately re-hit next frame. Path / moveTarget
+      // clear so the character isn't yanked back into the danger.
+      if (caster) {
+        const angle = Phaser.Math.Angle.Between(caster.x, caster.y, character.x, character.y);
+        character.setVelocity(Math.cos(angle) * 250, Math.sin(angle) * 250);
+      }
+      character.moveTarget = null;
+      character.path = null;
+
+      // Invuln window matches the previous contact-damage flow.
+      // Slow-cooldown enemies hit once per cooldown; fast biters
+      // (rats, bats) overlap with the invuln tail and effectively
+      // do steady damage while in range.
+      this.time.delayedCall(500, () => {
+        if (character.clearTint) character.clearTint();
+        character.invuln = false;
+      });
+
+      if (character.hp <= 0) {
+        character.setActive(false).setVisible(false);
+        // Tear down any active speech bubble so a final quip doesn't
+        // linger in midair above the (now invisible) corpse.
+        if (character.speechBubble) {
+          character.speechBubble.destroy();
+          character.speechBubble = null;
+        }
+        if (this.aliveParty().length === 0) this.gameOver();
+      }
+    }
+
     findNearestEnemy(character) {
       return this.findNearestEnemyInRange(character, Infinity);
     }
@@ -1387,6 +1581,86 @@ export function makeGameScene(config) {
         if (d <= bestD) { bestD = d; best = e; }
       });
       return best;
+    }
+
+    // Returns true if a monster's chosen attack skill has the given
+    // skill-tag (TAGS.RANGED / TAGS.MELEE). Reads the live skill from
+    // the SKILLS catalog because each monster carries `skill` (a string
+    // key) on placement rather than the resolved skill object.
+    enemyHasAttackTag(enemy, tag) {
+      const key = enemy && enemy.skill;
+      const skill = key ? SKILLS[key] : null;
+      if (!skill || !skill.tags) return false;
+      return skill.tags.includes(tag);
+    }
+
+    // Honour personality.targetMode when choosing who a character
+    // shoots at / runs toward. Falls back to the nearest enemy whenever
+    // no monster in range matches the requested filter, so an empty
+    // selection never leaves the character standing still.
+    //
+    // Modes:
+    //   'closest'   — nearest enemy in the annulus (legacy default).
+    //   'lowest_hp' — alive enemy in range with the least HP. Good for
+    //                 finishers and assassin playstyles.
+    //   'ranged'    — enemies whose attack skill is tagged RANGED.
+    //                 Lets the player tell their Knight to charge the
+    //                 archers first instead of the nearest goblin.
+    //   'melee'     — enemies whose attack skill is tagged MELEE.
+    //                 Useful for a tank that wants to interpose on the
+    //                 closing wave of skeletons.
+    findPreferredTargetInRange(character, range, minRange = 0) {
+      const mode = character?.personality?.targetMode || 'closest';
+      if (mode === 'closest') {
+        return this.findNearestEnemyInRange(character, range, minRange);
+      }
+
+      // Collect every candidate in the annulus once; we'll either pick
+      // by HP or by tag below. Iterating Phaser groups twice is fine
+      // (small N) but the two cheap modes (closest, default) skip it.
+      const candidates = [];
+      this.enemies.children.iterate((e) => {
+        if (!e || !e.active || e.dying) return;
+        const d = Phaser.Math.Distance.Between(character.x, character.y, e.x, e.y);
+        if (d < minRange) return;
+        if (d > range) return;
+        candidates.push({ enemy: e, d });
+      });
+      if (candidates.length === 0) return null;
+
+      if (mode === 'lowest_hp') {
+        let best = null;
+        let bestHp = Infinity;
+        let bestD = Infinity;
+        for (const { enemy, d } of candidates) {
+          const hp = enemy.hp ?? Infinity;
+          // Lowest HP wins; tie-break on distance so two full-HP
+          // skeletons resolve deterministically to the closer one.
+          if (hp < bestHp || (hp === bestHp && d < bestD)) {
+            bestHp = hp;
+            bestD = d;
+            best = enemy;
+          }
+        }
+        return best;
+      }
+
+      if (mode === 'ranged' || mode === 'melee') {
+        const tag = mode === 'ranged' ? TAGS.RANGED : TAGS.MELEE;
+        let best = null;
+        let bestD = Infinity;
+        for (const { enemy, d } of candidates) {
+          if (!this.enemyHasAttackTag(enemy, tag)) continue;
+          if (d < bestD) { bestD = d; best = enemy; }
+        }
+        if (best) return best;
+        // No match — fall through to closest so the character still
+        // does *something* rather than freezing.
+        return this.findNearestEnemyInRange(character, range, minRange);
+      }
+
+      // Unknown mode (forward-compat): treat as closest.
+      return this.findNearestEnemyInRange(character, range, minRange);
     }
 
     // Closest chest within `range` px. Used by determineCharacterGoal
@@ -1453,22 +1727,23 @@ export function makeGameScene(config) {
       return best;
     }
 
-    // Like nearestAlivePartyMember but excludes the caller — used by
-    // the regroup goal so a character doesn't pick themselves as the
-    // "nearest ally". Falls back to null for a one-member party (or
-    // when the rest of the party is dead).
-    nearestAliveAlly(character) {
-      let best = null, bestD = Infinity;
+    // Centre of the whole party — the average position of every living
+    // member, INCLUDING the caller. This is the stable reference point
+    // the Independence leash measures against. Including self is the
+    // key fix for party-wide drift: an exclude-self centroid is biased
+    // toward whoever has wandered off, so the rest of the party kept
+    // chasing that outlier and the whole group slid across the map.
+    // With self included the centre stays put while one member roams
+    // out and back. Returns null when fewer than two members are alive
+    // — a lone survivor has no group to regroup with.
+    partyAnchor(character) {
+      let sx = 0, sy = 0, n = 0;
       for (const c of this.party) {
-        if (!c.active || c === character) continue;
-        const d = Phaser.Math.Distance.Between(character.x, character.y, c.x, c.y);
-        if (d < bestD) { bestD = d; best = c; }
+        if (!c.active) continue;
+        sx += c.x; sy += c.y; n++;
       }
-      return best;
-    }
-
-    isFleeing(character) {
-      return character.hp <= character.maxHp * character.personality.fleeAtHpFraction;
+      if (n < 2) return null;
+      return { x: sx / n, y: sy / n };
     }
 
     // Called at spawn, on every party level-up, and after any
@@ -1512,7 +1787,7 @@ export function makeGameScene(config) {
     // Each character carries a hidden persona (assigned at creation)
     // and a `nextSpeakAt` timestamp. tickPartySpeech polls every
     // frame; when a character's timer has expired AND they're in a
-    // "quiet" state (no immediate threat, not casting, not fleeing)
+    // "quiet" state (no immediate threat, not casting)
     // we roll a 50% chance to actually speak. If they pass the roll
     // the cooldown jumps to 90–150 s; if not (or if they're in
     // combat) we push the next eligibility check out by 5–10 s and
@@ -1524,7 +1799,7 @@ export function makeGameScene(config) {
         if (!c.active) continue;
         if (time < c.nextSpeakAt) continue;
         if (!this.isCharacterQuiet(c, time)) {
-          // In combat / mid-cast / fleeing — try again soon.
+          // In combat / mid-cast — try again soon.
           c.nextSpeakAt = time + 5000 + Math.random() * 5000;
           continue;
         }
@@ -1536,12 +1811,11 @@ export function makeGameScene(config) {
       }
     }
 
-    // "Quiet" = safe enough to chat. No fleeing, no active cast lock,
-    // no enemy crowding within ~5 tiles. Movement and click moveTarget
-    // are explicitly NOT disqualifiers — characters happily comment
-    // while strolling.
+    // "Quiet" = safe enough to chat. No active cast lock and no enemy
+    // crowding within ~5 tiles. Movement and click moveTarget are
+    // explicitly NOT disqualifiers — characters happily comment while
+    // strolling.
     isCharacterQuiet(c, time) {
-      if (this.isFleeing(c)) return false;
       if (c.castLockUntil && time < c.castLockUntil) return false;
       if (this.findNearestEnemyInRange(c, TILE * 5)) return false;
       return true;
@@ -1836,25 +2110,34 @@ export function makeGameScene(config) {
     // Convenience for goal-determination. Returns a world point
     // {x, y} for the character's *primary* intent. Priority:
     //   1. Explicit moveTarget (player click) — always wins.
-    //   2. Chest within ~3 tiles — auto-pickup. Tighter than enemy
-    //      aggro so the party only veers for loot they're nearly
-    //      walking over already.
+    //   2. Chest within the Greed radius — loot detour. Because this
+    //      sits ABOVE combat, a greedy character will break off a
+    //      fight to grab distant loot; a frugal one only veers for
+    //      chests they're nearly walking over. Greed 0 disables the
+    //      detour entirely (pickups still happen on collision).
     //   3. Enemy outside preferredDistance + buffer — auto-engage.
-    //   4. Regroup with the rest of the party when drifted > 4 tiles
-    //      from the nearest ally. Keeps an idle party loosely
-    //      clustered without freezing wander — once they're back
-    //      within the threshold the goal disappears and wander
-    //      / drift takes over again.
+    //   4. Regroup toward the group centre when the character has
+    //      strayed past their Independence leash (with hysteresis so
+    //      the goal doesn't flicker at the boundary). Inside the leash
+    //      they roam / wander freely; the buddy push handles
+    //      close-range spacing once they're back together.
     //   5. None — character idles / wanders.
     determineCharacterGoal(character) {
       if (character.moveTarget) return { x: character.moveTarget.x, y: character.moveTarget.y };
 
-      // Nearby chest — grab it before fighting if it's right there.
-      const chest = this.findNearestChestInRange(character, TILE * 3);
-      if (chest) return { x: chest.x, y: chest.y };
+      // Loot detour — Greed is the radius (px) within which a chest
+      // becomes a goal. Sits above combat so high Greed overrides the
+      // fight; Greed 0 means "never go out of my way for loot".
+      const greed = character.personality.greed ?? (TILE * 3);
+      if (greed > 0) {
+        const chest = this.findNearestChestInRange(character, greed);
+        if (chest) return { x: chest.x, y: chest.y };
+      }
 
-      // Enemy outside the preferred ring — auto-engage.
-      const enemy = this.findNearestEnemy(character);
+      // Enemy outside the preferred ring — auto-engage. Honours the
+      // personality.targetMode dropdown so a "lowest HP" character
+      // chases the wounded straggler instead of the closest body.
+      const enemy = this.findPreferredTargetInRange(character, SIGHT_RANGE);
       if (enemy) {
         const dx = enemy.x - character.x;
         const dy = enemy.y - character.y;
@@ -1868,15 +2151,31 @@ export function makeGameScene(config) {
         }
       }
 
-      // Regroup — head back toward the nearest ally when we've drifted
-      // too far. Threshold is generous (4 tiles) so a normal wander
-      // step doesn't constantly retrigger this; the buddy push handles
-      // close-range spacing once they're back together.
-      const ally = this.nearestAliveAlly(character);
-      if (ally) {
-        const ax = ally.x - character.x;
-        const ay = ally.y - character.y;
-        if (Math.hypot(ax, ay) > TILE * 4) return { x: ally.x, y: ally.y };
+      // Regroup — head back toward the group centre once we've strayed
+      // past the Independence leash. Higher Independence = longer leash
+      // = wanders farther before being pulled back. The leash is
+      // clamped to INDEPENDENCE_MIN (which sits a tile beyond the buddy
+      // push range) so cohesion and separation never fight over the
+      // same band. Hysteresis: once regrouping begins it continues
+      // until we're back within (leash − REGROUP_HYSTERESIS); without
+      // that gap the goal toggled on/off every frame at the boundary
+      // and the party jittered. Inside the leash this returns null so
+      // wander / drift takes over.
+      const anchor = this.partyAnchor(character);
+      if (anchor) {
+        const ax = anchor.x - character.x;
+        const ay = anchor.y - character.y;
+        const dist = Math.hypot(ax, ay);
+        const leash = Math.max(
+          INDEPENDENCE_MIN,
+          character.personality.independence ?? (TILE * 4),
+        );
+        if (character.regrouping) {
+          if (dist <= leash - REGROUP_HYSTERESIS) character.regrouping = false;
+        } else if (dist > leash) {
+          character.regrouping = true;
+        }
+        if (character.regrouping) return { x: anchor.x, y: anchor.y };
       }
 
       return null;
@@ -1884,8 +2183,12 @@ export function makeGameScene(config) {
 
     // ---- enemy AI ----------------------------------------
 
-    updateEnemies() {
-      const time = this.time.now;
+    updateEnemies(time, delta) {
+      // Fall-throughs if called without time/delta (e.g. legacy
+      // call sites). Used to be true; today the only caller passes
+      // both — kept for safety.
+      const now = time != null ? time : this.time.now;
+      const step = delta != null ? delta : 16;
       this.enemies.children.iterate((e) => {
         if (!e || !e.active || e.dying) return;
         // Slow status (applied by Ice Knife and similar). Speed is
@@ -1893,13 +2196,35 @@ export function makeGameScene(config) {
         // for the slow live in the skill's own onHit (a frost puff)
         // — leaving the enemy's tint alone here keeps the damage
         // flash readable while a slow is active.
-        const slowed = e.slowUntil && time < e.slowUntil;
+        const slowed = e.slowUntil && now < e.slowUntil;
         if (!slowed && e.slowUntil) e.slowUntil = 0;
         const speed = e.speed * (slowed ? (e.slowFactor || 1) : 1);
 
         const target = this.nearestAlivePartyMember(e);
         if (!target) { e.setVelocity(0); e.path = null; return; }
         const d = Phaser.Math.Distance.Between(e.x, e.y, target.x, target.y);
+
+        // Try to fire the enemy's skill at the nearest party
+        // member. Cooldown ticks every frame whether the enemy is
+        // in aggro range or not — that way a slow-cooldown caster
+        // doesn't have to "wind up" again after the player breaks
+        // away and returns. The actual cast still needs the target
+        // inside the skill's range / minRange annulus.
+        if (e.skill) {
+          e.skillCooldown = Math.max(0, (e.skillCooldown || 0) - step);
+          if (e.skillCooldown <= 0) {
+            const skill = SKILLS[e.skill];
+            if (skill) {
+              const minR = skill.minRange || 0;
+              if (d <= skill.range && d >= minR) {
+                e.setFlipX(target.x < e.x);
+                skill.cast(this, e, target);
+                e.skillCooldown = skill.cooldownMs;
+              }
+            }
+          }
+        }
+
         if (d >= e.aggroRange) {
           e.setVelocity(0);
           e.path = null;
@@ -2003,6 +2328,74 @@ export function makeGameScene(config) {
       const loot = 4 + this.mapLevel;
       const newMap = generateMap({ width, height, monsters, loot });
       this.loadLevel(newMap);
+      // The party grows one hero at a time: a second joins on map 2, a
+      // third on map 3. Offer the recruit modal whenever the party is
+      // short of 3 and an unchosen class remains.
+      this.maybeOpenRecruitModal();
+    }
+
+    // ---- recruit modal (progressive party building) ------------
+
+    maybeOpenRecruitModal() {
+      if (this.party.length >= 3) return;
+      const available = CLASS_ORDER.filter((r) => !this.chosenClasses.includes(r));
+      if (available.length === 0) return;
+      this.openRecruitModal(available);
+    }
+
+    openRecruitModal(available) {
+      this.recruitModalOpen = true;
+      this.recruitSelected = available[0];
+      this.refreshRecruitModal(available);
+      const modal = document.getElementById('recruit-modal');
+      if (modal) modal.classList.add('open');
+    }
+
+    // (Re)builds the class-choice cards and syncs the name field.
+    // Called on open and whenever the player picks a different class.
+    refreshRecruitModal(available) {
+      const list = document.getElementById('recruit-classes');
+      const nameInput = document.getElementById('recruit-name');
+      if (nameInput && document.activeElement !== nameInput) {
+        nameInput.value = this.recruitSelected;
+      }
+      if (!list) return;
+      list.innerHTML = '';
+      for (const role of available) {
+        const info = CLASS_INFO[role] || { statsLine: '', blurb: '' };
+        const btn = document.createElement('button');
+        btn.className = 'recruit-class' + (role === this.recruitSelected ? ' selected' : '');
+        const name = document.createElement('div');
+        name.className = 'recruit-class-name';
+        name.textContent = role;
+        const stats = document.createElement('div');
+        stats.className = 'recruit-class-stats';
+        stats.textContent = info.statsLine;
+        const blurb = document.createElement('div');
+        blurb.className = 'recruit-class-blurb';
+        blurb.textContent = info.blurb;
+        btn.appendChild(name);
+        btn.appendChild(stats);
+        btn.appendChild(blurb);
+        btn.addEventListener('click', () => {
+          this.recruitSelected = role;
+          if (nameInput) nameInput.value = role;
+          this.refreshRecruitModal(available);
+        });
+        list.appendChild(btn);
+      }
+    }
+
+    confirmRecruit() {
+      if (!this.recruitModalOpen) return;
+      const role = this.recruitSelected;
+      if (!role) return;
+      const nameInput = document.getElementById('recruit-name');
+      const name = (nameInput && nameInput.value.trim()) || role;
+      const modal = document.getElementById('recruit-modal');
+      if (modal) modal.classList.remove('open');
+      this.recruitModalOpen = false;
+      this.recruitCharacter(role, name);
     }
 
     // ---- revive modal -----------------------------------------
@@ -2105,7 +2498,8 @@ export function makeGameScene(config) {
     applyBuff(character, buff) {
       character.buffs = character.buffs || [];
       const entry = {
-        stats: { ...buff.stats },
+        stats: { ...(buff.stats || {}) },
+        mult: { ...(buff.mult || {}) },
         expiresAt: this.time.now + buff.durationMs,
       };
       character.buffs.push(entry);
@@ -2114,14 +2508,17 @@ export function makeGameScene(config) {
         if (i >= 0) character.buffs.splice(i, 1);
       });
       const labelBits = [];
-      for (const stat in buff.stats) {
-        labelBits.push('+' + buff.stats[stat] + ' ' + statShortLabel(stat));
+      for (const stat in entry.stats) {
+        labelBits.push('+' + entry.stats[stat] + ' ' + statShortLabel(stat));
+      }
+      for (const stat in entry.mult) {
+        labelBits.push('×' + entry.mult[stat] + ' ' + statShortLabel(stat));
       }
       showBuffPopup(this, character, labelBits.join(' '));
     }
 
-    // Sum of active buff bonuses for a given stat. Used by damage/
-    // defense calcs alongside equipmentBonus.
+    // Sum of active *additive* buff bonuses for a given stat. Used by
+    // damage / defense calcs alongside equipmentBonus.
     buffBonus(character, stat) {
       if (!character.buffs) return 0;
       let total = 0;
@@ -2132,45 +2529,83 @@ export function makeGameScene(config) {
       return total;
     }
 
-    onPlayerHit(character, enemy) {
-      if (character.invuln || enemy.dying || !character.active) return;
-      // Treat the enemy attack as a pseudo-skill: armor + active
-      // buffs (e.g. Guard) reduce the base, then the damage pipeline
-      // applies Resolve + per-tag resistance from the character's
-      // resistances map.
-      const defense = equipmentBonus(character.equipment, 'defense')
-        + this.buffBonus(character, 'defense');
-      const base = Math.max(0, (enemy.dmg || 1) - defense);
-      const damageType = enemy.attackDamageType || TAGS.PHYSICAL;
-      const skillTags = enemy.attackSkillTags || [TAGS.MELEE];
-      const damage = applyDamageFormula(base, damageType, skillTags, null, character);
-      character.hp -= damage;
-      character.invuln = true;
-      character.setTint(0xff6666);
-
-      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, character.x, character.y);
-      character.setVelocity(Math.cos(angle) * 250, Math.sin(angle) * 250);
-      character.moveTarget = null;
-      // Knockback teleports the character off the prior path — the
-      // next frame's pathfinding goal-selection will compute a fresh
-      // one if anything's worth chasing.
-      character.path = null;
-
-      this.time.delayedCall(500, () => {
-        if (character.clearTint) character.clearTint();
-        character.invuln = false;
-      });
-
-      if (character.hp <= 0) {
-        character.setActive(false).setVisible(false);
-        // Tear down any active speech bubble so a final quip doesn't
-        // linger in midair above the (now invisible) corpse.
-        if (character.speechBubble) {
-          character.speechBubble.destroy();
-          character.speechBubble = null;
-        }
-        if (this.aliveParty().length === 0) this.gameOver();
+    // Product of active *multiplicative* buffs for a given stat
+    // (default 1.0 when none). Strengthening Warcry's ×2 damage flows
+    // through here — see damageEnemy.
+    buffMultiplier(character, stat) {
+      if (!character || !character.buffs) return 1;
+      let m = 1;
+      for (const b of character.buffs) {
+        const v = b.mult && b.mult[stat];
+        if (typeof v === 'number') m *= v;
       }
+      return m;
+    }
+
+    // Applies a Warcry's buff to every ally within range. The caster
+    // is included only when the skill sets includeCaster — Strengthening
+    // Warcry leaves the caster out (it empowers the rest of the party).
+    applyWarcry(caster, skill) {
+      for (const ally of this.party) {
+        if (!ally.active) continue;
+        if (ally === caster && !skill.includeCaster) continue;
+        const d = Phaser.Math.Distance.Between(caster.x, caster.y, ally.x, ally.y);
+        if (d > skill.range) continue;
+        this.applyBuff(ally, skill.buff);
+      }
+    }
+
+    // ---- auras (persistent party-wide fields) -------------
+    //
+    // An aura is a passive emitted by whoever wears the granting item
+    // (e.g. a Crown's Haste Aura). Unlike buffs it isn't timed or cast
+    // — recomputeAuras runs every frame and re-derives, for each
+    // character, which auras currently cover them based on live
+    // positions. The result lives in character.auras as
+    // { skillKey: auraBonusMap }, keyed by skill so the *same* aura
+    // from two emitters can't stack (no double-haste).
+
+    // The aura skills a character currently emits (from equipped gear).
+    auraSkillsOf(character) {
+      const out = [];
+      for (const key of character.skillKeys || []) {
+        const skill = SKILLS[key];
+        if (skill && skill.aura) out.push({ key, skill });
+      }
+      return out;
+    }
+
+    // Recompute every character's covering auras for this frame.
+    recomputeAuras() {
+      for (const c of this.party) c.auras = {};
+      for (const emitter of this.party) {
+        if (!emitter.active) continue;
+        const emitted = this.auraSkillsOf(emitter);
+        if (emitted.length === 0) continue;
+        for (const { key, skill } of emitted) {
+          for (const c of this.party) {
+            if (!c.active) continue;
+            const d = Phaser.Math.Distance.Between(emitter.x, emitter.y, c.x, c.y);
+            if (d > skill.range) continue;
+            // Keyed by skill → a second emitter of the same aura just
+            // overwrites the identical entry, never stacks.
+            c.auras[key] = skill.aura;
+          }
+        }
+      }
+    }
+
+    // Sum of a stat across every aura currently covering the character.
+    // Different aura *types* contributing to the same stat do add up;
+    // the same aura type never appears twice (deduped in recomputeAuras).
+    auraBonus(character, stat) {
+      if (!character.auras) return 0;
+      let total = 0;
+      for (const key in character.auras) {
+        const v = character.auras[key][stat];
+        if (typeof v === 'number') total += v;
+      }
+      return total;
     }
 
     gameOver() {
